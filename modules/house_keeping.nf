@@ -27,8 +27,8 @@ process get_software_versions {
 	echo $workflow.manifest.version > v_pipeline.txt
 	echo $workflow.nextflow.version > v_nextflow.txt
 
-	echo $params.docker_container_humann3 | cut -d: -f 2 > v_qiime.txt
-	echo $params.docker_container_metaphlan | cut -d: -f 2 > v_multiqc.txt
+	echo $params.docker_container_humann3 | cut -d: -f 2 > v_humann.txt
+	echo $params.docker_container_metaphlan | cut -d: -f 2 > v_metaphlan.txt
 	echo $params.docker_container_qiime2 | cut -d: -f 2 > v_qiime.txt
 	echo $params.docker_container_multiqc | cut -d: -f 2 > v_multiqc.txt
 
