@@ -9,7 +9,7 @@ process get_software_versions {
 
 	//Starting the biobakery container. I need to run metaphlan and Humann to get
 	//their version number (due to the fact that they live in the same container)
-  container params.docker_container_biobakery
+  container params.docker_container_multiqc
 
 	//input:
 	//val (some_value)
@@ -27,9 +27,8 @@ process get_software_versions {
 	echo $workflow.manifest.version > v_pipeline.txt
 	echo $workflow.nextflow.version > v_nextflow.txt
 
-	metaphlan --version > v_metaphlan.txt
-	humann --version > v_humann.txt
-
+	echo $params.docker_container_humann3 | cut -d: -f 2 > v_qiime.txt
+	echo $params.docker_container_metaphlan | cut -d: -f 2 > v_multiqc.txt
 	echo $params.docker_container_qiime2 | cut -d: -f 2 > v_qiime.txt
 	echo $params.docker_container_multiqc | cut -d: -f 2 > v_multiqc.txt
 

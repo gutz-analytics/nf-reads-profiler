@@ -118,7 +118,8 @@ summary['User name'] = System.getProperty("user.name") //User's account name
 
 summary['Container Engine'] = workflow.containerEngine
 if(workflow.containerEngine) summary['Container'] = workflow.container
-summary['biobakery'] = params.docker_container_biobakery
+summary['HUMAnN'] = params.docker_container_humann3
+summary['MetaPhlAn'] = params.docker_container_metaphlan
 summary['MultiQC'] = params.docker_container_multiqc
 
 //General
