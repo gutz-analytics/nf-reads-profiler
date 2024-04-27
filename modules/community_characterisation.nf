@@ -15,7 +15,7 @@ process profile_taxa {
   tag "$name"
 
 	//Enable multicontainer settings
-  container params.docker_container_biobakery
+  container params.docker_container_metaphlan
 
 	publishDir "${params.outdir}/${params.project}/${params.prefix}/taxa", mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
 
@@ -69,7 +69,7 @@ process profile_function {
     tag "$name"
 
 	//Enable multicontainer settings
-  container params.docker_container_biobakery
+  container params.docker_container_humann3
 
 	publishDir {params.rna ? "${params.outdir}/${params.project}/${params.prefix}/function/metaT" : "${params.outdir}/${params.project}/${params.prefix}/function/metaG" }, mode: 'copy', pattern: "*.{tsv,log}"
 
