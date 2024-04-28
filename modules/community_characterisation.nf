@@ -26,7 +26,7 @@ process profile_taxa {
 	tuple val(name), path("*.biom")
 	tuple val(name), path("*_metaphlan_bugs_list.tsv"), emit: to_profile_function_bugs
 	path "profile_taxa_mqc.yaml", emit: profile_taxa_log
-	path "*.bz2"
+
 
 	when:
 	!params.rna
