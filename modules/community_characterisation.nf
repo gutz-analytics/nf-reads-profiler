@@ -33,6 +33,8 @@ process profile_taxa {
 
 	script:
 	"""
+	echo ${params.metaphlan_db}
+	
 	metaphlan \\
 		--input_type fastq \\
 		--tmp_dir . \\
