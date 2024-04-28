@@ -23,7 +23,7 @@ process profile_taxa {
 	tuple val(name), path(reads)
 
 	output:
-	tuple val(name), path("*.biom"), emit: to_alpha_diversity
+	tuple val(name), path("*.biom")
 	tuple val(name), path("*_metaphlan_bugs_list.tsv"), emit: to_profile_function_bugs
 	path "profile_taxa_mqc.yaml", emit: profile_taxa_log
 	path "*.bz2"
@@ -34,20 +34,19 @@ process profile_taxa {
 	script:
 	"""
 	echo ${params.metaphlan_db}
-	
+
 	metaphlan \\
 		--input_type fastq \\
 		--tmp_dir . \\
 		--biom ${name}.biom \\
 		--index ${params.metaphlan_index} \\
 		--bowtie2db ${params.metaphlan_db} \\
-		--bowtie2out ${name}.bowtie2out.bz2 \\
 		--bt2_ps ${params.bt2options} \\
 		--add_viruses \\
 		--sample_id ${name} \\
 		--nproc ${task.cpus} \\
 		--unclassified_estimation \\
-		-s ${name}.sam.bz2 \\
+		--no-map \\
 		$reads \\
 		${name}_metaphlan_bugs_list.tsv 1> profile_taxa_mqc.txt
 
@@ -112,50 +111,3 @@ process profile_function {
 }
 
 
-/**
-	Community Characterisation - STEP 3. Evaluates several alpha-diversity measures.
-
-*/
-
-process alpha_diversity {
-
-  tag "$name"
-
-	container params.docker_container_qiime2
-
-	publishDir "${params.outdir}/${params.project}/${params.prefix}/alpha_diversity", mode: 'copy', pattern: "*.{tsv}"
-
-	input:
-	tuple val(name), path(metaphlan_bug_list)
-
-  output:
-	path "*_alpha_diversity.tsv", emit: alpha_diversity_tsv
-	path "alpha_diversity_mqc.yaml", emit: alpha_diversity_log
-
-	when:
-	!params.rna
-
-	script:
-	"""
-	#It checks if the profiling was successful, that is if identifies at least three species
-	n=\$(grep -o s__ $metaphlan_bug_list | wc -l  | cut -d\" \" -f 1)
-	if (( n <= 3 )); then
-		#The file should be created in order to be returned
-		touch ${name}_alpha_diversity.tsv
-	else
-		echo $name > ${name}_alpha_diversity.tsv
-		qiime tools import --input-path $metaphlan_bug_list --type 'FeatureTable[Frequency]' --input-format BIOMV100Format --output-path ${name}_abundance_table.qza
-		for alpha in ace berger_parker_d brillouin_d chao1 chao1_ci dominance doubles enspie esty_ci fisher_alpha gini_index goods_coverage heip_e kempton_taylor_q lladser_pe margalef mcintosh_d mcintosh_e menhinick michaelis_menten_fit osd pielou_e robbins shannon simpson simpson_e singles strong
-		do
-			qiime diversity alpha --i-table ${name}_abundance_table.qza --p-metric \$alpha --output-dir \$alpha &> /dev/null
-			qiime tools export --input-path \$alpha/alpha_diversity.qza --output-path \${alpha} &> /dev/null
-			value=\$(sed -n '2p' \${alpha}/alpha-diversity.tsv | cut -f 2)
-		    echo -e  \$alpha'\t'\$value
-		done >> ${name}_alpha_diversity.tsv
-	fi
-
-	# MultiQC doesn't have a module for qiime yet. As a consequence, I
-	# had to create a YAML file with all the info I need via a bash script
-	bash generate_alpha_diversity_log.sh \${n} > alpha_diversity_mqc.yaml
-	"""
-}

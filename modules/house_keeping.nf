@@ -91,7 +91,6 @@ process log {
 	file "merge_paired_end_cleaned_mqc.yaml"
 	file "profile_taxa_mqc.yaml"
 	file "profile_functions_mqc.yaml"
-	file "alpha_diversity_mqc.yaml"
 
 	output:
 	path "${params.prefix}_multiqc_report.html"

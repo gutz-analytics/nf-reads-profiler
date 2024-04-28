@@ -2,7 +2,7 @@
 
 nextflow.enable.dsl=2
 
-include { profile_taxa; profile_function; alpha_diversity } from './modules/community_characterisation'
+include { profile_taxa; profile_function } from './modules/community_characterisation'
 include { merge_paired_end_cleaned; get_software_versions; log } from './modules/house_keeping'
 
 def versionMessage()
@@ -232,7 +232,6 @@ workflow {
 
   profile_function(profile_function_ch1, profile_function_ch2)
 
-  alpha_diversity(profile_taxa.out.to_alpha_diversity)
 	// Stage config files
 
 }
@@ -246,6 +245,5 @@ log( multiqc_config,
 		merge_paired_end_cleaned_log.ifEmpty([]),
 		profile_taxa.out.profile_taxa_log.ifEmpty([]),
 		profile_function.out.profile_function_log.ifEmpty([]),
-		alpha_diversity.out.alpha_diversity_log.ifEmpty([])
 	)
 */
