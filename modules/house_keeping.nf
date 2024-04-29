@@ -36,6 +36,22 @@ process get_software_versions {
 	"""
 }
 
+process cat_fastqs {
+  tag "$name"
+
+  input:
+  tuple val(meta), path(reads)
+
+  output:
+  tuple val(meta), path("*_cat.fq.gz"), emit: reads_merged
+
+  script:
+  name = task.ext.name ?: "${meta.id}"
+  """
+  cat ${reads} > ${name}_cat.fq.gz
+  """  
+}
+
 process merge_paired_end_cleaned {
 
 	tag "$name"

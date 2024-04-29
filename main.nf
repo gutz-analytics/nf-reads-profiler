@@ -2,20 +2,21 @@
 
 nextflow.enable.dsl=2
 
-include { profile_taxa; profile_function } from './modules/community_characterisation'
-include { merge_paired_end_cleaned; get_software_versions; log } from './modules/house_keeping'
+include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables } from './modules/community_characterisation'
+include { merge_paired_end_cleaned; get_software_versions; cat_fastqs} from './modules/house_keeping'
+include { samplesheetToList           } from 'plugin/nf-schema'
 
 def versionMessage()
 {
-	log.info"""
+  log.info"""
 
-	nf-reads-profiler - Version: ${workflow.manifest.version}
-	""".stripIndent()
+  nf-reads-profiler - Version: ${workflow.manifest.version}
+  """.stripIndent()
 }
 
 def helpMessage()
 {
-	log.info"""
+  log.info"""
 
 nf-reads-profiler - Version: ${workflow.manifest.version}
 
@@ -34,10 +35,10 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
     --bt2options          value   BowTie2 options
 
   HUMANn parameters for functional profiling:
-    --taxonomic_profile	  path	  s3path to precalculate metaphlan3 taxonomic profile output.
+    --taxonomic_profile   path    s3path to precalculate metaphlan3 taxonomic profile output.
     --chocophlan          path    folder for the ChocoPhlAn database
-    --uniref              path	  folder for the UniRef database
-		--annotation  <true|false>   whether annotation is enabled (default: false)
+    --uniref              path    folder for the UniRef database
+    --annotation  <true|false>   whether annotation is enabled (default: false)
 
 nf-reads-profiler supports FASTQ and compressed FASTQ files.
 """
@@ -47,8 +48,8 @@ nf-reads-profiler supports FASTQ and compressed FASTQ files.
 Prints version when asked for
 */
 if (params.version) {
-	versionMessage()
-	exit 0
+  versionMessage()
+  exit 0
 }
 
 /**
@@ -56,35 +57,18 @@ Prints help when asked for
 */
 
 if (params.help) {
-	helpMessage()
-	exit 0
+  helpMessage()
+  exit 0
 }
 
-//--reads2 can be omitted when the library layout is "single" (indeed it specifies single-end
-//sequencing)
-if (!params.singleEnd && (params.reads2 == "null") ) {
-	exit 1, "If dealing with paired-end reads, please set the reads2 parameters\nif dealing with single-end reads, please set the library layout to 'single'"
-}
-
-//--reads1 and --reads2 can be omitted (and the default from the config file used instead)
-//only when mode is "characterisation". Obviously, --reads2 should be always omitted when the
-//library layout is single.
-if ((!params.singleEnd && (params.reads1 == "null" || params.reads2 == "null")) || (params.singleEnd && params.reads1 == "null")) {
-	exit 1, "Please set the reads1 and/or reads2 parameters"
-}
-
-// if rna is True, taxonomic profile is required.
-// if (params.rna && params.taxonomic_profile == ""){
-// 	exit 1, "Please set the --taxonomic_profile parameter for transcriptiomic data."
-// }
 
 //Creates working dir
 workingpath = params.outdir + "/" + params.project
 workingdir = file(workingpath)
 if( !workingdir.exists() ) {
-	if( !workingdir.mkdirs() ) 	{
-		exit 1, "Cannot create working directory: $workingpath"
-	}
+  if( !workingdir.mkdirs() )  {
+    exit 1, "Cannot create working directory: $workingpath"
+  }
 }
 
 
@@ -124,7 +108,7 @@ summary['MultiQC'] = params.docker_container_multiqc
 
 //General
 summary['Running parameters'] = ""
-summary['Reads'] = "[" + params.reads1 + ", " + params.reads2 + "]"
+summary['Sample Sheet'] = params.input
 summary['Prefix'] = params.prefix
 summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
 summary['Data Type'] = params.rna ? 'Metatranscriptomic' : 'Metagenomic'
@@ -154,10 +138,10 @@ log.info ""
 
 
 /**
-	Prepare workflow introspection
+  Prepare workflow introspection
 
-	This process adds the workflow introspection (also printed at runtime) in the logs
-	This is NF-CORE code.
+  This process adds the workflow introspection (also printed at runtime) in the logs
+  This is NF-CORE code.
 */
 
 def create_workflow_summary(summary) {
@@ -179,71 +163,96 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 
 
 
+workflow PIPELINE_INITIALISATION {
+  // adapted from taxprofiler
+  take:
+  input             //  string: Path to input samplesheet
 
-// The user will specify the clean path either as a single clean file (that is the nf-reads-profiler
-// default behaviour), or as two files (forward/reverse). ]
-// In the former case, the user will set singleEnd = true and only one file will be
-// selected and used directly for taxa and community profiling.
-// In the latter case, the user will set singleEnd = false and provide two files, that will
-// be merged before feeding the relevant channels for profiling.
-if (params.singleEnd) {
-	to_profile_taxa_functions = Channel
-		.fromList([[params.prefix, [params.reads1]]])
+  main:
+  //
+  // Create channel from input file provided through params.input
+  //
+  Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+      .branch { meta, fastq_1, fastq_2 ->
+        single: fastq_2 == []
+          return tuple(meta, [fastq_1])
+        paired: fastq_2 != []
+          return tuple(meta, [fastq_1, fastq_2])
+      }
+      .set { input }
+  
+  ch_samplesheet = input.single.mix(input.paired)
 
-	//Initialise empty channels
-	reads_merge_paired_end_cleaned = Channel.empty()
-	merge_paired_end_cleaned_log = Channel.empty()
-} else if (!params.singleEnd) {
-	reads_merge_paired_end_cleaned = Channel
-		.fromList([[params.prefix, [params.reads1, params.reads2]]] )
+  emit:
+  samplesheet = ch_samplesheet
 
-	//Stage boilerplate log
-	merge_paired_end_cleaned_log = Channel.fromPath("$projectDir/assets/merge_paired_end_cleaned_mqc.yaml")
-
-	//Initialise empty channels
-	to_profile_taxa_functions = Channel.empty()
 }
-
-
-if (params.rna){
-	custom_taxa_profile = Channel
-		.fromList([[params.prefix, params.taxonomic_profile]])
-}
-else{
-	custom_taxa_profile = Channel.empty()
-}
-
-
 
 workflow {
+  to_profile_taxa_functions = Channel.empty()
 
-	//Channel.of(1) |
-	get_software_versions()
+  // read sample sheet
+  PIPELINE_INITIALISATION(params.input) |
+  // cat fastqs
+  cat_fastqs
 
-	//workflow_summary = create_workflow_summary(summary)
+  cat_fastqs.out.reads_merged
+    .set { merged_reads }
 
-  reads_merge_paired_end_cleaned | merge_paired_end_cleaned
+  
+  // profile taxa
+  profile_taxa(merged_reads)
 
-  to_profile_taxa_functions.mix(merge_paired_end_cleaned.out.to_profile_taxa_merged) | profile_taxa
+  // profile function
+  profile_function(merged_reads, profile_taxa.out.to_profile_function_bugs)
+  // profile_taxa.out.view()
 
-	profile_function_ch1 = to_profile_taxa_functions.mix(merge_paired_end_cleaned.out.to_profile_functions_merged)
+  // regroup metadata
+  ch_genefamilies = profile_function.out.profile_function_gf
+              .map {
+                meta, table ->
+                    def meta_new = meta - meta.subMap('id')
+                meta_new.put('type','genefamilies')
+                [ meta_new, table ]
+              }
+              .groupTuple()
+  ch_pathabundance = profile_function.out.profile_function_pa
+              .map {
+                meta, table ->
+                    def meta_new = meta - meta.subMap('id')
+                meta_new.put('type','pathabundance')
+                [ meta_new, table ]
+              }
+              .groupTuple()
+  ch_pathcoverage = profile_function.out.profile_function_pc
+            .map {
+              meta, table ->
+                  def meta_new = meta - meta.subMap('id')
+              meta_new.put('type','pathcoverage')
+              [ meta_new, table ]
+            }
+            .groupTuple()
 
-	profile_function_ch2 = profile_taxa.out.to_profile_function_bugs.mix(custom_taxa_profile)
+  ch_metaphlan = profile_taxa.out.to_profile_function_bugs
+            .map {
+              meta, table ->
+                  def meta_new = meta - meta.subMap('id')
+              [ meta_new, table ]
+            }
+            .groupTuple()
 
-  profile_function(profile_function_ch1, profile_function_ch2)
-
-	// Stage config files
-
+  combine_humann_tables(ch_genefamilies.mix(ch_pathcoverage, ch_pathabundance))
+  combine_metaphlan_tables(ch_metaphlan)
 }
 
 /*
 multiqc_config = file(params.multiqc_config)
 
 log( multiqc_config,
-		//workflow_summary,
-		get_software_versions.out.software_versions_yaml,
-		merge_paired_end_cleaned_log.ifEmpty([]),
-		profile_taxa.out.profile_taxa_log.ifEmpty([]),
-		profile_function.out.profile_function_log.ifEmpty([]),
-	)
+    //workflow_summary,
+    get_software_versions.out.software_versions_yaml,
+    merge_paired_end_cleaned_log.ifEmpty([]),
+    profile_taxa.out.profile_taxa_log.ifEmpty([]),
+    profile_function.out.profile_function_log.ifEmpty([]),
+  )
 */
