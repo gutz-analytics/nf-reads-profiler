@@ -162,5 +162,5 @@ process combine_metaphlan_tables {
   merge_metaphlan_tables.py ${table} \\
     -o ${run}_bugs_list_combined.tsv
   """
-
+}
 
