@@ -126,7 +126,7 @@ process combine_humann_tables {
   tuple val(meta), path(table)
 
   output:
-  tuple val(meta), path('_combined.tsv')
+  tuple val(meta), path('*_combined.tsv')
 
   when:
   params.annotation
