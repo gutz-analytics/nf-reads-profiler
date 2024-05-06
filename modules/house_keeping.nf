@@ -27,9 +27,9 @@ process get_software_versions {
   echo $workflow.manifest.version > v_pipeline.txt
   echo $workflow.nextflow.version > v_nextflow.txt
 
+  echo $params.docker_container_fastp | cut -d: -f 2 > v_fastp.txt
   echo $params.docker_container_humann3 | cut -d: -f 2 > v_humann.txt
   echo $params.docker_container_metaphlan | cut -d: -f 2 > v_metaphlan.txt
-  echo $params.docker_container_qiime2 | cut -d: -f 2 > v_qiime.txt
   echo $params.docker_container_multiqc | cut -d: -f 2 > v_multiqc.txt
 
   scrape_software_versions.py > software_versions_mqc.yaml
@@ -74,6 +74,7 @@ process clean_single_end {
   -o ${name}_trimmed.fq.gz \\
   --reads_to_process ${params.nreads} \\
   --dedup \\
+  --disable_quality_filtering \\
   --json ${name}_fastp.json \\
   --thread ${task.cpus}
   """
@@ -101,6 +102,7 @@ process clean_paired_end {
   -O out.R2.fq.gz \\
   --reads_to_process ${params.nreads} \\
   --dedup \\
+  --disable_quality_filtering \\
   --json ${name}_fastp.json \\
   --thread ${task.cpus}
 
@@ -150,28 +152,3 @@ process merge_paired_end_cleaned {
 
 
 
-process log {
-
-  publishDir "${params.outdir}/${params.project}/${params.prefix}/log", mode: 'copy'
-
-  container params.docker_container_multiqc
-
-  input:
-  file multiqc_config
-  //path workflow_summary
-  file "software_versions_mqc.yaml"
-  file "merge_paired_end_cleaned_mqc.yaml"
-  file "profile_taxa_mqc.yaml"
-  file "profile_functions_mqc.yaml"
-
-  output:
-  path "${params.prefix}_multiqc_report.html"
-  path "${params.prefix}_multiqc_data"
-
-  script:
-  """
-  multiqc --config $multiqc_config . -f
-  mv multiqc_report.html ${params.prefix}_multiqc_report.html
-  mv multiqc_data ${params.prefix}_multiqc_data
-  """
-}

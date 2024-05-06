@@ -9,27 +9,21 @@ data_format: "yaml"
 
 run_modules:
   - custom_content
-  - fastqc
+  - fastp
+  - metaphlan
 
 module_order:
   - custom_content
 
-table_columns_visible:
-  FastQC: False
-
-skip_generalstats: true
+skip_generalstats: False
 
 # Report order
 report_section_order:
-  merge_paired_end_cleaned:
-    order: 13
+  fastp:
+    order: 0
   metaphlan:
-    order: 12
-  humann:
-    order: 11
-  alpha-diversity:
     order: 10
+  humann:
+    order: 20
   software-versions:
     order: -1
-  workflow-summary:
-    order: -2

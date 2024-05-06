@@ -109,7 +109,6 @@ summary['MultiQC'] = params.docker_container_multiqc
 //General
 summary['Running parameters'] = ""
 summary['Sample Sheet'] = params.input
-summary['Prefix'] = params.prefix
 summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
 summary['Data Type'] = params.rna ? 'Metatranscriptomic' : 'Metagenomic'
 summary['Merge Reads'] = params.mergeReads
@@ -145,7 +144,7 @@ log.info ""
 */
 
 def create_workflow_summary(summary) {
-    def yaml_file = workDir.resolve("${params.prefix}.workflow_summary_mqc.yaml")
+    def yaml_file = workDir.resolve("workflow_summary_mqc.yaml")
     yaml_file.text  = """
     id: 'workflow-summary'
     description: "This information is collected when the pipeline is started."
@@ -162,6 +161,32 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 }
 
 
+
+
+
+process log {
+
+  publishDir "${params.outdir}/${params.project}/log", mode: 'copy'
+
+  container params.docker_container_multiqc
+
+  input:
+  file multiqc_config
+  file software_versions
+  file ('*_fastp.json') from clean_single_end.collect().ifEmpty([])
+  file ('*_fastp.json') from clean_paired_end.collect().ifEmpty([])
+  file ('*_profile_taxa_mqc.yaml') from profile_taxa.collect().ifEmpty([])
+  file ('*_profile_functions_mqc.yaml') from profile_function.collect().ifEmpty([])
+
+  output:
+  path "multiqc_report.html"
+  path "multiqc_data"
+
+  script:
+  """
+  multiqc --config $multiqc_config . -f
+  """
+}
 
 workflow PIPELINE_INITIALISATION {
   // adapted from taxprofiler
@@ -243,6 +268,10 @@ workflow {
 
   combine_humann_tables(ch_genefamilies.mix(ch_pathcoverage, ch_pathabundance))
   combine_metaphlan_tables(ch_metaphlan)
+
+  get_software_versions()
+  multiqc_config = file(params.multiqc_config)
+  log(multiqc_config, get_software_versions.out.software_versions_yaml)
 }
 
 /*

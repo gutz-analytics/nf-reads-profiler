@@ -25,7 +25,7 @@ process profile_taxa {
   output:
   tuple val(meta), path("*.biom")
   tuple val(meta), path("*_metaphlan_bugs_list.tsv"), emit: to_profile_function_bugs
-  path "profile_taxa_mqc.yaml", emit: profile_taxa_log
+  path "*_profile_taxa_mqc.yaml", emit: profile_taxa_log
 
 
   when:
@@ -54,7 +54,7 @@ process profile_taxa {
 
   # MultiQC doesn't have a module for Metaphlan yet. As a consequence, I
   # had to create a YAML pathwith all the info I need via a bash script
-  bash scrape_profile_taxa_log.sh ${name}_metaphlan_bugs_list.tsv > profile_taxa_mqc.yaml
+  bash scrape_profile_taxa_log.sh ${name}_metaphlan_bugs_list.tsv > ${name}_profile_taxa_mqc.yaml
   """
 }
 
@@ -85,7 +85,7 @@ process profile_function {
   tuple val(meta), path("*_genefamilies.tsv"), emit: profile_function_gf
   tuple val(meta), path("*_pathcoverage.tsv"), emit: profile_function_pc
   tuple val(meta), path("*_pathabundance.tsv"), emit: profile_function_pa
-  tuple val(meta), path("profile_functions_mqc.yaml"), emit: profile_function_log
+  tuple val(meta), path("*_profile_functions_mqc.yaml"), emit: profile_function_log
 
   when:
   params.annotation
@@ -110,7 +110,7 @@ process profile_function {
 
   # MultiQC doesn't have a module for humann yet. As a consequence, I
   # had to create a YAML file with all the info I need via a bash script
-  bash scrape_profile_functions.sh ${name} ${name}_HUMAnN.log > profile_functions_mqc.yaml
+  bash scrape_profile_functions.sh ${name} ${name}_HUMAnN.log > ${name}_profile_functions_mqc.yaml
   """
 }
 
