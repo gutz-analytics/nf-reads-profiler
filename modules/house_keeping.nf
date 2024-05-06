@@ -150,5 +150,29 @@ process merge_paired_end_cleaned {
 */
 
 
+process log {
+
+  publishDir "${params.outdir}/${params.project}/log", mode: 'copy'
+
+  container params.docker_container_multiqc
+
+  input:
+  path multiqc_config
+  path software_versions
+  path fastp_single
+  path fastp_paired
+  path profile_taxa
+  path profile_function
+
+  output:
+  path "multiqc_report.html"
+  path "multiqc_data"
+
+  script:
+  """
+  multiqc --config $multiqc_config . -f
+  """
+}
+
 
 
