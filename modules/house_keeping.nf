@@ -152,17 +152,19 @@ process merge_paired_end_cleaned {
 
 process MULTIQC {
 
-  publishDir "${params.outdir}/${params.project}/log", mode: 'copy'
+  publishDir "${params.outdir}/${params.project}/${run}/log", mode: 'copy'
 
   container params.docker_container_multiqc
 
   input:
-  path  multiqc_files
+  path  metadata_files
+  tuple val(meta), path(data_files)
   path(multiqc_config)
   output:
   path "multiqc_report.html"
   path "multiqc_data"
 
+  run = task.ext.run ?: "${meta.run}"
   script:
   """
   multiqc --config $multiqc_config . -f

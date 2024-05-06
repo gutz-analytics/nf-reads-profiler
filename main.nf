@@ -234,7 +234,7 @@ workflow {
             }
             .groupTuple()
 
-  ch_metaphlan = profile_taxa.out.to_profile_function_bugs
+  ≈ = profile_taxa.out.to_profile_function_bugs
             .map {
               meta, table ->
                   def meta_new = meta - meta.subMap('id')
@@ -248,14 +248,23 @@ workflow {
   get_software_versions()
 	ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
   ch_multiqc_files = Channel.empty()
-  ch_multiqc_files = ch_multiqc_files.mix(get_software_versions.out.software_versions_yaml)
   ch_multiqc_files = ch_multiqc_files.mix(clean_single_end.out.fastp_log.collect().ifEmpty([]))
   ch_multiqc_files = ch_multiqc_files.mix(clean_paired_end.out.fastp_log.collect().ifEmpty([]))
   ch_multiqc_files = ch_multiqc_files.mix(profile_taxa.out.profile_taxa_log.collect().ifEmpty([]))
   ch_multiqc_files = ch_multiqc_files.mix(profile_function.out.profile_function_log.collect().ifEmpty([]))
 
+  // group by run
+  ch_multiqc_files = ch_multiqc_files
+          .map {
+            meta, table ->
+                def meta_new = meta - meta.subMap('id')
+            [ meta_new, table ]
+          }
+          .groupTuple()
+
   MULTIQC (
-      ch_multiqc_files.collect(),
-      ch_multiqc_config.toList()
+  	get_software_versions.out.software_versions_yaml,
+    ch_multiqc_files.collect(),
+    ch_multiqc_config.toList()
   )
 }
