@@ -234,7 +234,7 @@ workflow {
             }
             .groupTuple()
 
-  ≈ = profile_taxa.out.to_profile_function_bugs
+  ch_metaphlan = profile_taxa.out.to_profile_function_bugs
             .map {
               meta, table ->
                   def meta_new = meta - meta.subMap('id')
