@@ -3,7 +3,7 @@
 nextflow.enable.dsl=2
 
 include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables } from './modules/community_characterisation'
-include { merge_paired_end_cleaned; clean_single_end; clean_paired_end; get_software_versions; cat_fastqs} from './modules/house_keeping'
+include { MULTIQC; merge_paired_end_cleaned; clean_single_end; clean_paired_end; get_software_versions; cat_fastqs} from './modules/house_keeping'
 include { samplesheetToList           } from 'plugin/nf-schema'
 
 def versionMessage()
@@ -246,14 +246,18 @@ workflow {
   combine_metaphlan_tables(ch_metaphlan)
 
   get_software_versions()
-  multiqc_config = channel.fromPath(params.multiqc_config)
-  log(multiqc_config,
-      get_software_versions.out.software_versions_yaml,
-      clean_single_end.out.fastp_log.collect().ifEmpty([]),
-      clean_paired_end.out.fastp_log.collect().ifEmpty([]),
-      profile_taxa.out.profile_taxa_log.collect().ifEmpty([]),
-      profile_function.out.profile_function_log.collect().ifEmpty([]))
+	ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yml", checkIfExists: true)
+  ch_multiqc_files = Channel.empty()
+  ch_multiqc_files = ch_multiqc_files.mix(get_software_versions.out.software_versions_yaml)
+  ch_multiqc_files = ch_multiqc_files.mix(clean_single_end.out.fastp_log.collect().ifEmpty([]))
+  ch_multiqc_files = ch_multiqc_files.mix(clean_paired_end.out.fastp_log.collect().ifEmpty([]))
+  ch_multiqc_files = ch_multiqc_files.mix(profile_taxa.out.profile_taxa_log.collect().ifEmpty([]))
+  ch_multiqc_files = ch_multiqc_files.mix(profile_function.out.profile_function_log.collect().ifEmpty([]))
 
+  MULTIQC (
+      ch_multiqc_files.collect(),
+      ch_multiqc_config.toList()
+  )
 }
 
 /*
