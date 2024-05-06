@@ -246,7 +246,7 @@ workflow {
   combine_metaphlan_tables(ch_metaphlan)
 
   get_software_versions()
-	ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yml", checkIfExists: true)
+	ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
   ch_multiqc_files = Channel.empty()
   ch_multiqc_files = ch_multiqc_files.mix(get_software_versions.out.software_versions_yaml)
   ch_multiqc_files = ch_multiqc_files.mix(clean_single_end.out.fastp_log.collect().ifEmpty([]))
@@ -259,15 +259,3 @@ workflow {
       ch_multiqc_config.toList()
   )
 }
-
-/*
-multiqc_config = file(params.multiqc_config)
-
-log( multiqc_config,
-    //workflow_summary,
-    get_software_versions.out.software_versions_yaml,
-    merge_paired_end_cleaned_log.ifEmpty([]),
-    profile_taxa.out.profile_taxa_log.ifEmpty([]),
-    profile_function.out.profile_function_log.ifEmpty([]),
-  )
-*/
