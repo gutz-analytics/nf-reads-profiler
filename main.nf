@@ -3,7 +3,7 @@
 nextflow.enable.dsl=2
 
 include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables } from './modules/community_characterisation'
-include { merge_paired_end_cleaned; get_software_versions; cat_fastqs} from './modules/house_keeping'
+include { merge_paired_end_cleaned; clean_single_end; clean_paired_end; get_software_versions; cat_fastqs} from './modules/house_keeping'
 include { samplesheetToList           } from 'plugin/nf-schema'
 
 def versionMessage()
@@ -181,10 +181,11 @@ workflow PIPELINE_INITIALISATION {
       }
       .set { input }
   
-  ch_samplesheet = input.single.mix(input.paired)
+  // ch_samplesheet = input.single.mix(input.paired)
 
   emit:
-  samplesheet = ch_samplesheet
+  ch_single = input.single
+  ch_paired = input.paired
 
 }
 
@@ -192,14 +193,13 @@ workflow {
   to_profile_taxa_functions = Channel.empty()
 
   // read sample sheet
-  PIPELINE_INITIALISATION(params.input) |
-  // cat fastqs
-  cat_fastqs
+  PIPELINE_INITIALISATION(params.input)
 
-  cat_fastqs.out.reads_merged
-    .set { merged_reads }
+  clean_single_end(PIPELINE_INITIALISATION.out.ch_single)
+  clean_paired_end(PIPELINE_INITIALISATION.out.ch_paired)
 
-  
+  merged_reads = clean_single_end.out.reads_cleaned.mix(clean_paired_end.out.reads_cleaned)
+
   // profile taxa
   profile_taxa(merged_reads)
 

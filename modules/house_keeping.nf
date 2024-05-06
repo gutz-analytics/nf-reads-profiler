@@ -53,6 +53,61 @@ process cat_fastqs {
   """  
 }
 
+process clean_single_end {
+  tag "$name"
+  label "fastp"
+  container params.docker_container_fastp
+
+  input:
+  tuple val(meta), path(reads)
+
+  output:
+  tuple val(meta), path("*_trimmed.fq.gz"), emit: reads_cleaned
+  tuple val(meta), path("*_fastp.json"), emit: fastp_log
+
+  script:
+  name = task.ext.name ?: "${meta.id}"
+
+  """
+  fastp \\
+  -i ${reads[0]} \\
+  -o ${name}_trimmed.fq.gz \\
+  --reads_to_process ${params.nreads} \\
+  --dedup \\
+  --json ${name}_fastp.json \\
+  --thread ${task.cpus}
+  """
+}
+process clean_paired_end {
+  tag "$name"
+  label "fastp"
+  container params.docker_container_fastp
+
+  input:
+  tuple val(meta), path(reads)
+
+  output:
+  tuple val(meta), path("*_trimmed.fq.gz"), emit: reads_cleaned
+  tuple val(meta), path("*_fastp.json"), emit: fastp_log
+
+  script:
+  name = task.ext.name ?: "${meta.id}"
+
+  """
+  fastp \\
+  -i ${reads[0]} \\
+  -I ${reads[1]} \\
+  -o out.R1.fq.gz \\
+  -O out.R2.fq.gz \\
+  --reads_to_process ${params.nreads} \\
+  --dedup \\
+  --json ${name}_fastp.json \\
+  --thread ${task.cpus}
+
+  cat out.R1.fq.gz out.R2.fq.gz > ${name}_trimmed.fq.gz
+  """
+}
+
 process merge_paired_end_cleaned {
 
   tag "$name"
