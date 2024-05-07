@@ -245,9 +245,6 @@ workflow {
   combine_humann_tables(ch_genefamilies.mix(ch_pathcoverage, ch_pathabundance))
   combine_metaphlan_tables(ch_metaphlan)
 
-  get_software_versions()
-  ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
-  
   ch_multiqc_files = Channel.empty()
   ch_multiqc_files = ch_multiqc_files.concat(clean_single_end.out.fastp_log.ifEmpty([]))
   ch_multiqc_files = ch_multiqc_files.concat(clean_paired_end.out.fastp_log.ifEmpty([]))
@@ -255,16 +252,15 @@ workflow {
   ch_multiqc_files = ch_multiqc_files.concat(profile_function.out.profile_function_log.ifEmpty([]))
   
 
+  ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
 
-  // group by run
   ch_multiqc_runs = ch_multiqc_files.map {
               meta, table ->
                   def meta_new = meta - meta.subMap('id')
               [ meta_new, table ]
             }
             .groupTuple()
-            .view()
-
+  get_software_versions()
   MULTIQC (
     get_software_versions.out.software_versions_yaml,
     ch_multiqc_runs,
