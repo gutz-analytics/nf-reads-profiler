@@ -264,7 +264,7 @@ workflow {
             }
             .groupTuple()
             .view()
-  get_software_versions()
+
   MULTIQC (
     get_software_versions.out.software_versions_yaml,
     ch_multiqc_runs,
