@@ -25,7 +25,7 @@ process profile_taxa {
   output:
   tuple val(meta), path("*.biom")
   tuple val(meta), path("*_metaphlan_bugs_list.tsv"), emit: to_profile_function_bugs
-  path "*_profile_taxa_mqc.yaml", emit: profile_taxa_log
+  tuple val(meta), path("*_profile_taxa_mqc.yaml"), emit: profile_taxa_log
 
 
   when:
