@@ -36,24 +36,8 @@ process get_software_versions {
   """
 }
 
-process cat_fastqs {
-  tag "$name"
-  container params.docker_container_bbmap
 
-  input:
-  tuple val(meta), path(reads)
-
-  output:
-  tuple val(meta), path("*_cat.fq.gz"), emit: reads_merged
-
-  script:
-  name = task.ext.name ?: "${meta.id}"
-  """
-  cat ${reads} > ${name}_cat.fq.gz
-  """  
-}
-
-process clean_single_end {
+process clean_reads {
   tag "$name"
   label "fastp"
   container params.docker_container_fastp
@@ -67,77 +51,36 @@ process clean_single_end {
 
   script:
   name = task.ext.name ?: "${meta.id}"
+  if (meta.single_end) {
+    // println "Single ${name}"
+    """
+    fastp \\
+    -i ${reads[0]} \\
+    -o ${name}_trimmed.fq.gz \\
+    --reads_to_process ${params.nreads} \\
+    --dedup \\
+    --disable_quality_filtering \\
+    --json ${name}_fastp.json \\
+    --thread ${task.cpus}
+    """
+  } else {
+    // println "Double ${name}"
+    """
+    fastp \\
+    -i ${reads[0]} \\
+    -I ${reads[1]} \\
+    -o out.R1.fq.gz \\
+    -O out.R2.fq.gz \\
+    --reads_to_process ${params.nreads} \\
+    --dedup \\
+    --disable_quality_filtering \\
+    --json ${name}_fastp.json \\
+    --thread ${task.cpus}
 
-  """
-  fastp \\
-  -i ${reads[0]} \\
-  -o ${name}_trimmed.fq.gz \\
-  --reads_to_process ${params.nreads} \\
-  --dedup \\
-  --disable_quality_filtering \\
-  --json ${name}_fastp.json \\
-  --thread ${task.cpus}
-  """
+    cat out.R1.fq.gz out.R2.fq.gz > ${name}_trimmed.fq.gz
+    """
+  }
 }
-process clean_paired_end {
-  tag "$name"
-  label "fastp"
-  container params.docker_container_fastp
-
-  input:
-  tuple val(meta), path(reads)
-
-  output:
-  tuple val(meta), path("*_trimmed.fq.gz"), emit: reads_cleaned
-  tuple val(meta), path("*_fastp.json"), emit: fastp_log
-
-  script:
-  name = task.ext.name ?: "${meta.id}"
-
-  """
-  fastp \\
-  -i ${reads[0]} \\
-  -I ${reads[1]} \\
-  -o out.R1.fq.gz \\
-  -O out.R2.fq.gz \\
-  --reads_to_process ${params.nreads} \\
-  --dedup \\
-  --disable_quality_filtering \\
-  --json ${name}_fastp.json \\
-  --thread ${task.cpus}
-
-  cat out.R1.fq.gz out.R2.fq.gz > ${name}_trimmed.fq.gz
-  """
-}
-
-process merge_paired_end_cleaned {
-
-  tag "$name"
-  container params.docker_container_bbmap
-
-  input:
-  tuple val(name), path(reads)
-
-  output:
-  tuple val(name), path("*_QCd.fq.gz"), emit: to_profile_taxa_merged
-  tuple val(name), path("*_QCd.fq.gz"), emit: to_profile_functions_merged
-
-  when:
-  !params.singleEnd
-
-    script:
-  """
-  # This step will have no logging because the information are not relevant
-  # I will simply use a boilerplate YAML to record that this has happened
-  # If the files were not compressed, they will be at this stage
-
-  #Sets the maximum memory to the value requested in the config file
-    maxmem=\$(echo \"$task.memory\" | sed 's/ //g' | sed 's/B//g')
-
-  reformat.sh -Xmx\"\$maxmem\" in1=${reads[0]} in2=${reads[1]} out=${name}_QCd.fq.gz threads=${task.cpus}
-  """
-}
-
 // ------------------------------------------------------------------------------
 //  MULTIQC LOGGING
 // ------------------------------------------------------------------------------

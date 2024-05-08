@@ -3,7 +3,7 @@
 nextflow.enable.dsl=2
 
 include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables } from './modules/community_characterisation'
-include { MULTIQC; merge_paired_end_cleaned; clean_single_end; clean_paired_end; get_software_versions; cat_fastqs} from './modules/house_keeping'
+include { MULTIQC; get_software_versions; clean_reads} from './modules/house_keeping'
 include { samplesheetToList           } from 'plugin/nf-schema'
 
 def versionMessage()
@@ -163,7 +163,6 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 
 
 
-
 workflow PIPELINE_INITIALISATION {
   // adapted from taxprofiler
   take:
@@ -173,33 +172,43 @@ workflow PIPELINE_INITIALISATION {
   //
   // Create channel from input file provided through params.input
   //
+  // ch_input = samplesheet
+  //     .map { meta, run_accession, instrument_platform, fastq_1, fastq_2, fasta ->
+  //         meta.run_accession = run_accession
+  //         meta.instrument_platform = instrument_platform
+
+  //         // Define single_end based on the conditions
+  //         meta.single_end = ( fastq_1 && !fastq_2 && instrument_platform != 'OXFORD_NANOPORE' )
+
+ 
   Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
-      .branch { meta, fastq_1, fastq_2 ->
-        single: fastq_2 == []
-          return tuple(meta, [fastq_1])
-        paired: fastq_2 != []
-          return tuple(meta, [fastq_1, fastq_2])
+      .map { meta, fastq_1, fastq_2 ->
+        meta.single_end = ( fastq_1 && !fastq_2 )
+        if ( !fastq_2 ) {
+          reads = [fastq_1]
+        }
+        else {
+          reads = [fastq_1, fastq_2]
+        }
+        return [meta, reads]
       }
       .set { input }
   
   // ch_samplesheet = input.single.mix(input.paired)
 
   emit:
-  ch_single = input.single
-  ch_paired = input.paired
-
+  ch_input = input
 }
 
 workflow {
   to_profile_taxa_functions = Channel.empty()
 
-  // read sample sheet
+// read sample sheet
   PIPELINE_INITIALISATION(params.input)
-
-  clean_single_end(PIPELINE_INITIALISATION.out.ch_single)
-  clean_paired_end(PIPELINE_INITIALISATION.out.ch_paired)
-
-  merged_reads = clean_single_end.out.reads_cleaned.mix(clean_paired_end.out.reads_cleaned)
+  ch_input = PIPELINE_INITIALISATION.out.ch_input
+  ch_input.view()
+  clean_reads(ch_input)
+  merged_reads = clean_reads.out.reads_cleaned
 
   // profile taxa
   profile_taxa(merged_reads)
@@ -246,8 +255,7 @@ workflow {
   combine_metaphlan_tables(ch_metaphlan)
 
   ch_multiqc_files = Channel.empty()
-  ch_multiqc_files = ch_multiqc_files.concat(clean_single_end.out.fastp_log.ifEmpty([]))
-  ch_multiqc_files = ch_multiqc_files.concat(clean_paired_end.out.fastp_log.ifEmpty([]))
+  ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log.ifEmpty([]))
   ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
   ch_multiqc_files = ch_multiqc_files.concat(profile_function.out.profile_function_log.ifEmpty([]))
   
