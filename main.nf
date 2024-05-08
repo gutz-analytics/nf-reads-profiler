@@ -206,7 +206,7 @@ workflow {
 // read sample sheet
   PIPELINE_INITIALISATION(params.input)
   ch_input = PIPELINE_INITIALISATION.out.ch_input
-  ch_input.view()
+
   clean_reads(ch_input)
   merged_reads = clean_reads.out.reads_cleaned
 
