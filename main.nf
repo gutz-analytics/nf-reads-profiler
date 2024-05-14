@@ -162,7 +162,6 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 
 
 def output_exists(meta) {
-  println meta
   run = meta.run
   name = meta.id
   pathcoverage_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
@@ -221,7 +220,7 @@ workflow {
 
   // profile taxa
   profile_taxa(merged_reads)
-  
+
   ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
 
   // profile function
