@@ -221,6 +221,8 @@ workflow {
 
   // profile taxa
   profile_taxa(merged_reads)
+  
+  ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
 
   // profile function
   profile_function(ch_filtered_reads, profile_taxa.out.to_profile_function_bugs)
