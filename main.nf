@@ -161,6 +161,15 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 }
 
 
+def output_exists(meta) {
+  println meta
+  run = meta.run
+  name = meta.id
+  pathcoverage_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
+  genefamilies_file = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
+  pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
+  return pathcoverage_file.exists() && genefamilies_file.exists() && pathabundance_file.exists()
+}
 
 
 workflow PIPELINE_INITIALISATION {
@@ -214,8 +223,12 @@ workflow {
   profile_taxa(merged_reads)
 
   // profile function
-  profile_function(merged_reads, profile_taxa.out.to_profile_function_bugs)
-  // profile_taxa.out.view()
+  profile_function(ch_filtered_reads, profile_taxa.out.to_profile_function_bugs)
+  // !-->
+
+  // // profile function
+  // profile_function(merged_reads, profile_taxa.out.to_profile_function_bugs)
+ 
 
   // regroup metadata
   ch_genefamilies = profile_function.out.profile_function_gf
