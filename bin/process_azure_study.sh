@@ -79,8 +79,8 @@ echo "Metaphlan table: $METAPHLAN"
 # make temp dir 
 # <!-- from https://stackoverflow.com/a/34676160
 
-# the directory of the script
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# the directory of execution
+DIR=`pwd`
 
 # the temp directory used, within $DIR
 # omit the -p parameter to create a temporal directory in the default location
