@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # <!-- argument code written with ChatGPT4o
 # Function to display help message

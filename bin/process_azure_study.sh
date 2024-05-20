@@ -10,6 +10,7 @@ show_help() {
     echo "  -c, --container  CONTAINER     Azure storage container name."
     echo "  -s, --study      STUDY         Study name or identifier."
     echo "  -i, --input-dir  INPUT_DIR     Directory containing input data."
+    echo "  -k, --sas        SAS           Shared Access Signature (SAS) token."
     echo "  -h, --help                     Display this help message."
 }
 
@@ -38,6 +39,10 @@ while [[ "$#" -gt 0 ]]; do
             INPUT_DIR="$2"
             shift 2
             ;;
+        -k|--sas)
+            SAS="$2"
+            shift 2
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -51,7 +56,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Check for required arguments
-if [ -z "$ACCOUNT" ] || [ -z "$CONTAINER" ] || [ -z "$STUDY" ] || [ -z "$INPUT_DIR" ]; then
+if [ -z "$ACCOUNT" ] || [ -z "$CONTAINER" ] || [ -z "$STUDY" ] || [ -z "$INPUT_DIR" ] || [ -z "$SAS" ]; then
     echo "Error: Missing required arguments."
     show_help
     exit 1
@@ -103,14 +108,14 @@ trap cleanup EXIT
 # az copy input biom table
 
 # workflows/analysis_20240508/PRJEB46777/function/PRJEB46777_genefamilies_combined.tsv
-azcopy copy $GENEFAM ${} \
-${WORK_DIR}/${STUDY}_genefamilies_combined.tsv
+azcopy copy "${GENEFAM}${SAS}" \
+"${WORK_DIR}/${STUDY}_genefamilies_combined.tsv"
 
 # az copy input metaphlann table
 
 # workflows/analysis_20240508/PRJEB46777/taxa/PRJEB46777_bugs_list_combined.tsv
-azcopy copy $METAPHLAN ${} \
-${WORK_DIR}/${STUDY}_bugs_list_combined.tsv
+azcopy copy $METAPHLAN${SAS} \
+"${WORK_DIR}/${STUDY}_bugs_list_combined.tsv"
 
 
 # run process_humann_tables.sh
@@ -130,6 +135,6 @@ biom convert \
 # copy outputs to az blob
  azcopy cp \
  "${WORK_DIR}/${STUDY}_processed_tables" \
- "${STUDY_DIR}/${STUDY}_processed_tables" \
+ "${STUDY_DIR}/${STUDY}_processed_tables${SAS}" \
  --recursive=true 
 
