@@ -61,6 +61,7 @@ echo "Output Name: $OUTPUT_NAME"
 
 # !-->
 
+
 BIOM_PATH=${OUTPUT_DIR}/${OUTPUT_NAME}_genefamilies.biom
 
 # convert to biom

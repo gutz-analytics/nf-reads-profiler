@@ -105,6 +105,9 @@ trap cleanup EXIT
 
 # !-->
 
+# make output dir
+mkdir -p "${WORK_DIR}/${STUDY}_processed_tables"
+
 # az copy input biom table
 
 # workflows/analysis_20240508/PRJEB46777/function/PRJEB46777_genefamilies_combined.tsv
@@ -117,6 +120,12 @@ azcopy copy "${GENEFAM}${SAS}" \
 azcopy copy $METAPHLAN${SAS} \
 "${WORK_DIR}/${STUDY}_bugs_list_combined.tsv"
 
+# run biom convert for metaphlan
+biom convert \
+    --input-fp ${WORK_DIR}/${STUDY}_bugs_list_combined.tsv \
+    --output-fp ${WORK_DIR}/${STUDY}_processed_tables/${STUDY}_bugs_list_combined.biom \
+    --table-type 'Taxon table' \
+    --to-hdf5
 
 # run process_humann_tables.sh
 process_humann_tables.sh \
@@ -124,13 +133,6 @@ process_humann_tables.sh \
 -o ${WORK_DIR}/${STUDY}_processed_tables \
 -n ${STUDY}
 
-
-# run biom convert for metaphlan
-biom convert \
-    --input-fp ${WORK_DIR}/${STUDY}_bugs_list_combined.tsv \
-    --output-fp ${WORK_DIR}/${STUDY}_processed_tables/${STUDY}_bugs_list_combined.biom \
-    --table-type 'Taxon table' \
-    --to-hdf5
 
 # copy outputs to az blob
  azcopy cp \
