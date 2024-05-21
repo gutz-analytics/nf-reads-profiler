@@ -81,7 +81,7 @@ do
 
     # regroup table
 
-    humann_regroup_tables \
+    humann_regroup_table \
     -i $BIOM_PATH \
     -g $GROUP \
     -o $RGRP_PATH
