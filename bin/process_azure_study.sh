@@ -120,6 +120,7 @@ azcopy copy "${GENEFAM}${SAS}" \
 azcopy copy $METAPHLAN${SAS} \
 "${WORK_DIR}/${STUDY}_bugs_list_combined.tsv"
 
+echo "Converting MetaPhlAn table to biom"
 # run biom convert for metaphlan
 biom convert \
     --input-fp ${WORK_DIR}/${STUDY}_bugs_list_combined.tsv \
@@ -127,13 +128,15 @@ biom convert \
     --table-type 'Taxon table' \
     --to-hdf5
 
+echo "Processing HUMAnN tables"
 # run process_humann_tables.sh
 process_humann_tables.sh \
 -i ${WORK_DIR}/${STUDY}_genefamilies_combined.tsv \
 -o ${WORK_DIR}/${STUDY}_processed_tables \
--n ${STUDY}
+-n ${STUDY} \
+-g "uniref90_ko,uniref90_rxn,uniref90_pfam"
 
-
+echo "Copying outputs to blob storage"
 # copy outputs to az blob
  azcopy cp \
  "${WORK_DIR}/${STUDY}_processed_tables" \

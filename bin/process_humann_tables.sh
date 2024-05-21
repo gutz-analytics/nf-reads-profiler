@@ -10,6 +10,7 @@ show_help() {
     echo "  -i, --input       TABLE_PATH   Path to the input table file."
     echo "  -o, --output-dir  OUTPUT_DIR   Directory to save the output file."
     echo "  -n, --name        OUTPUT_NAME  Name of the output file."
+    echo "  -g, --groups      GROUPS       HUMAnN groups for regrouping."
     echo "  -h, --help                     Display this help message."
 }
 
@@ -34,6 +35,10 @@ while [[ "$#" -gt 0 ]]; do
             OUTPUT_NAME="$2"
             shift 2
             ;;
+        -g|--groups)
+            GROUPS="$2"
+            shift 2
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -47,7 +52,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Check for required arguments
-if [ -z "$TABLE_PATH" ] || [ -z "$OUTPUT_DIR" ] || [ -z "$OUTPUT_NAME" ]; then
+if [ -z "$TABLE_PATH" ] || [ -z "$OUTPUT_DIR" ] || [ -z "$OUTPUT_NAME" ] || [ -z "$GROUPS" ] ; then
     echo "Error: Missing required arguments."
     show_help
     exit 1
@@ -58,6 +63,7 @@ echo "Processing table data..."
 echo "Input Table Path: $TABLE_PATH"
 echo "Output Directory: $OUTPUT_DIR"
 echo "Output Name: $OUTPUT_NAME"
+echo "Groups: $GROUPS"
 
 # !-->
 
@@ -66,17 +72,19 @@ BIOM_PATH=${OUTPUT_DIR}/${OUTPUT_NAME}_genefamilies.biom
 
 # convert to biom
 
+echo "Converting HUMAnN table to biom"
 biom convert \
     --input-fp $TABLE_PATH \
     --output-fp $BIOM_PATH \
     --table-type 'Function table' \
     --to-hdf5
 
-GROUPS=('uniref90_ko' 'uniref90_rxn' 'uniref90_pfam')
- 
-for GROUP in "${GROUPS[@]}"
-do
+# GROUPS=('uniref90_ko' 'uniref90_rxn' 'uniref90_pfam')
 
+IFS=',' read -r -a array <<< "$GROUPS"
+for GROUP in "${array[@]}"
+do
+    echo "Regrouping to $GROUP"
     RGRP_PATH=${BIOM_PATH%.*}.${GROUP}.biom
     STRT_PATH=${BIOM_PATH%.*}.${GROUP}.str
 
@@ -88,6 +96,7 @@ do
     -o $RGRP_PATH
 
     # split stratified tables
+
 
     humann_split_stratified_table \
     -i $RGRP_PATH \
