@@ -10,7 +10,7 @@ show_help() {
     echo "  -i, --input       TABLE_PATH   Path to the input table file."
     echo "  -o, --output-dir  OUTPUT_DIR   Directory to save the output file."
     echo "  -n, --name        OUTPUT_NAME  Name of the output file."
-    echo "  -g, --groups      GROUPS       HUMAnN groups for regrouping."
+    echo "  -g, --groups      REGROUPS     HUMAnN groups for regrouping."
     echo "  -h, --help                     Display this help message."
 }
 
@@ -36,7 +36,7 @@ while [[ "$#" -gt 0 ]]; do
             shift 2
             ;;
         -g|--groups)
-            GROUPS="$2"
+            REGROUPS="$2"
             shift 2
             ;;
         -h|--help)
@@ -52,7 +52,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Check for required arguments
-if [ -z "$TABLE_PATH" ] || [ -z "$OUTPUT_DIR" ] || [ -z "$OUTPUT_NAME" ] || [ -z "$GROUPS" ] ; then
+if [ -z "$TABLE_PATH" ] || [ -z "$OUTPUT_DIR" ] || [ -z "$OUTPUT_NAME" ] || [ -z "$REGROUPS" ] ; then
     echo "Error: Missing required arguments."
     show_help
     exit 1
@@ -63,7 +63,7 @@ echo "Processing table data..."
 echo "Input Table Path: $TABLE_PATH"
 echo "Output Directory: $OUTPUT_DIR"
 echo "Output Name: $OUTPUT_NAME"
-echo "Groups: $GROUPS"
+echo "Groups: $REGROUPS"
 
 # !-->
 
@@ -79,9 +79,10 @@ biom convert \
     --table-type 'Function table' \
     --to-hdf5
 
+echo "Groups: $REGROUPS"
 # GROUPS=('uniref90_ko' 'uniref90_rxn' 'uniref90_pfam')
 
-IFS=',' read -r -a array <<< "$GROUPS"
+IFS=',' read -r -a array <<< $REGROUPS
 for GROUP in "${array[@]}"
 do
     echo "Regrouping to $GROUP"
