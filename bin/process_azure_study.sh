@@ -66,7 +66,7 @@ fi
 echo "Processing study data..."
 
 
-STUDY_DIR="https://${ACCOUNT}.blob.core.windwos.net/${CONTAINER}/${INPUT_DIR}/${STUDY}"
+STUDY_DIR="https://${ACCOUNT}.blob.core.windows.net/${CONTAINER}/${INPUT_DIR}/${STUDY}"
 GENEFAM="${STUDY_DIR}/function/${STUDY}_genefamilies_combined.tsv"
 METAPHLAN="${STUDY_DIR}/taxa/${STUDY}_bugs_list_combined.tsv"
 echo "Azure Account: $ACCOUNT"
