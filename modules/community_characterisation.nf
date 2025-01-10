@@ -100,6 +100,7 @@ process profile_function {
   humann \\
     --input $reads \\
     --output . \\
+    ${params.humann_params} \\
     --output-basename ${name} \\
     --taxonomic-profile ${metaphlan_bug_list} \\
     --nucleotide-database ${params.chocophlan} \\

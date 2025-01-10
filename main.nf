@@ -214,22 +214,21 @@ workflow {
 // read sample sheet
   PIPELINE_INITIALISATION(params.input)
   ch_input = PIPELINE_INITIALISATION.out.ch_input
-
   clean_reads(ch_input)
   merged_reads = clean_reads.out.reads_cleaned
 
   // profile taxa
   profile_taxa(merged_reads)
 
-  ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
 
+  ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
   // profile function
-  profile_function(ch_filtered_reads, profile_taxa.out.to_profile_function_bugs)
+  // profile_function(ch_filtered_reads, profile_taxa.out.to_profile_function_bugs)
   // !-->
 
   // // profile function
-  // profile_function(merged_reads, profile_taxa.out.to_profile_function_bugs)
- 
+  profile_function(merged_reads, profile_taxa.out.to_profile_function_bugs)
+
 
   // regroup metadata
   ch_genefamilies = profile_function.out.profile_function_gf
@@ -257,6 +256,7 @@ workflow {
             }
             .groupTuple()
 
+
   ch_metaphlan = profile_taxa.out.to_profile_function_bugs
             .map {
               meta, table ->
@@ -264,7 +264,8 @@ workflow {
               [ meta_new, table ]
             }
             .groupTuple()
-
+            .dump(tag: 'foo')
+            
   combine_humann_tables(ch_genefamilies.mix(ch_pathcoverage, ch_pathabundance))
   combine_metaphlan_tables(ch_metaphlan)
 

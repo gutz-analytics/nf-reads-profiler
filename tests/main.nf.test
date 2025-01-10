@@ -1,0 +1,60 @@
+nextflow_pipeline {
+    name "Test nf-reads-profiler pipeline"
+    script "main.nf"
+    config "conf/test.config"
+    
+    test("Should run paired-end analysis") {
+        when {
+            params {
+                input = "$projectDir/assets/samplesheet-test-local.csv"
+                project = "test_pe"
+                outdir = "$outputDir"
+                annotation = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/test_pe/STUDY1/taxa").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/function").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/taxa").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function").exists() },
+                
+                // Check taxa outputs
+                { assert path("$outputDir/test_pe/STUDY1/taxa/test_pe_1_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/taxa/test_pe_2_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/taxa/STUDY1_bugs_list_combined.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/taxa/test_pe_3_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/taxa/test_pe_4_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/taxa/STUDY2_bugs_list_combined.tsv").exists() },
+
+
+                
+                // Check function outputs (when annotation enabled)
+                { assert path("$outputDir/test_pe/STUDY1/function/test_pe_1_genefamilies.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/function/test_pe_1_pathcoverage.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/function/test_pe_1_pathabundance.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/function/test_pe_2_genefamilies.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/function/test_pe_2_pathcoverage.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/function/test_pe_2_pathabundance.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/test_pe_4_genefamilies.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/test_pe_4_pathcoverage.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/test_pe_4_pathabundance.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/test_pe_3_genefamilies.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/test_pe_3_pathcoverage.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/test_pe_3_pathabundance.tsv").exists() },
+
+
+
+                // Check combined fucntion outputs (when annotation enabled)
+                { assert path("$outputDir/test_pe/STUDY1/function/STUDY1_genefamilies_combined.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/function/STUDY1_pathcoverage_combined.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY1/function/STUDY1_pathabundance_combined.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/STUDY2_genefamilies_combined.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/STUDY2_pathcoverage_combined.tsv").exists() },
+                { assert path("$outputDir/test_pe/STUDY2/function/STUDY2_pathabundance_combined.tsv").exists() }
+            )
+        }
+    }
+}
