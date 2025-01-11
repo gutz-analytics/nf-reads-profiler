@@ -1,0 +1,3 @@
+sample,fastq_1,fastq_2,sra_accession,study_accession
+test_sra_1,,,SRR6664374,STUDY_SRA
+test_sra_2,,,SRR6664342,STUDY_SRA

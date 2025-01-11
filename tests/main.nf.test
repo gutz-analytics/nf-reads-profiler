@@ -3,7 +3,8 @@ nextflow_pipeline {
     script "main.nf"
     config "conf/test.config"
     
-    test("Should run paired-end analysis") {
+    test("Should run paired-end analysis with local files") {
+        tag "local"
         when {
             params {
                 input = "$projectDir/assets/samplesheet-test-local.csv"
@@ -29,9 +30,7 @@ nextflow_pipeline {
                 { assert path("$outputDir/test_pe/STUDY2/taxa/test_pe_4_metaphlan_bugs_list.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY2/taxa/STUDY2_bugs_list_combined.tsv").exists() },
 
-
-                
-                // Check function outputs (when annotation enabled)
+                // Check function outputs
                 { assert path("$outputDir/test_pe/STUDY1/function/test_pe_1_genefamilies.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY1/function/test_pe_1_pathcoverage.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY1/function/test_pe_1_pathabundance.tsv").exists() },
@@ -45,15 +44,92 @@ nextflow_pipeline {
                 { assert path("$outputDir/test_pe/STUDY2/function/test_pe_3_pathcoverage.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY2/function/test_pe_3_pathabundance.tsv").exists() },
 
-
-
-                // Check combined fucntion outputs (when annotation enabled)
+                // Check combined function outputs
                 { assert path("$outputDir/test_pe/STUDY1/function/STUDY1_genefamilies_combined.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY1/function/STUDY1_pathcoverage_combined.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY1/function/STUDY1_pathabundance_combined.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY2/function/STUDY2_genefamilies_combined.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY2/function/STUDY2_pathcoverage_combined.tsv").exists() },
                 { assert path("$outputDir/test_pe/STUDY2/function/STUDY2_pathabundance_combined.tsv").exists() }
+            )
+        }
+    }
+
+    test("Should run analysis with SRA download") {
+        tag "SRA"
+        setup {
+            // Create samplesheet with SRA accessions
+            def samplesheet = file("$outputDir/samplesheet-sra.csv")
+            samplesheet.text = """sample,fastq_1,fastq_2,sra_accession,study_accession
+test_sra_1,,,SRR6664374,STUDY_SRA
+test_sra_2,,,SRR6664342,STUDY_SRA"""
+        }
+
+        when {
+            params {
+                input = "$outputDir/samplesheet-sra.csv"
+                project = "test_sra"
+                outdir = "$outputDir"
+                annotation = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/test_sra/STUDY_SRA/taxa").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/function").exists() },
+                
+                // Check taxa outputs
+                { assert path("$outputDir/test_sra/STUDY_SRA/taxa/test_sra_1_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/taxa/test_sra_2_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/taxa/STUDY_SRA_bugs_list_combined.tsv").exists() },
+
+                // Check function outputs
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/test_sra_1_genefamilies.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/test_sra_1_pathcoverage.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/test_sra_1_pathabundance.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/test_sra_2_genefamilies.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/test_sra_2_pathcoverage.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/test_sra_2_pathabundance.tsv").exists() },
+
+                // Check combined function outputs
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/STUDY_SRA_genefamilies_combined.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/STUDY_SRA_pathcoverage_combined.tsv").exists() },
+                { assert path("$outputDir/test_sra/STUDY_SRA/function/STUDY_SRA_pathabundance_combined.tsv").exists() }
+            )
+        }
+    }
+
+    test("Should handle mixed local and SRA inputs") {
+        tag "SRA and local"
+        setup {
+            // Create samplesheet with both local files and SRA accessions
+            def samplesheet = file("$outputDir/samplesheet-mixed.csv")
+            samplesheet.text = """sample,fastq_1,fastq_2,sra_accession,study_accession
+test_local,$projectDir/test_data/SRX122150_SRR413772_1.fastq.gz,$projectDir/test_data/SRX122150_SRR413772_2.fastq.gz,,STUDY_MIXED
+test_sra,,,DRR326974,STUDY_MIXED"""
+        }
+
+        when {
+            params {
+                input = "$outputDir/samplesheet-mixed.csv"
+                project = "test_mixed"
+                outdir = "$outputDir"
+                annotation = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/taxa").exists() },
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/function").exists() },
+                
+                // Check both local and downloaded files are processed
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/taxa/test_local_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/taxa/test_sra_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/function/STUDY_MIXED_genefamilies_combined.tsv").exists() }
             )
         }
     }

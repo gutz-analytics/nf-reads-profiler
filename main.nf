@@ -4,7 +4,8 @@ nextflow.enable.dsl=2
 
 include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables } from './modules/community_characterisation'
 include { MULTIQC; get_software_versions; clean_reads} from './modules/house_keeping'
-include { samplesheetToList           } from 'plugin/nf-schema'
+include { AWS_DOWNLOAD; FASTERQ_DUMP  } from './modules/data_handling'
+include { samplesheetToList } from 'plugin/nf-schema'
 
 def versionMessage()
 {
@@ -209,12 +210,48 @@ workflow PIPELINE_INITIALISATION {
 }
 
 workflow {
-  to_profile_taxa_functions = Channel.empty()
+    // Parse input samplesheet using nf-validation plugin
+    Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+        .branch {
+            local: it[1] && (!it[2] || it[2] == '')  // Has fastq_1 but no or empty fastq_2
+            paired: it[1] && it[2]                    // Has both fastq_1 and fastq_2
+            sra: !it[1] && it[3] =~ /^[ESD]RR[0-9]+$/    // No fastq files but has DRR accession
+        }
+        .set { input_ch }
 
-// read sample sheet
-  PIPELINE_INITIALISATION(params.input)
-  ch_input = PIPELINE_INITIALISATION.out.ch_input
-  clean_reads(ch_input)
+    // Process local files
+    input_ch.local
+        .map { meta, fastq_1, fastq_2, sra_id -> 
+            meta.single_end = true
+            [ meta, [ fastq_1 ] ]
+        }
+        .set { local_reads }
+
+    input_ch.paired
+        .map { meta, fastq_1, fastq_2, sra_id ->
+            meta.single_end = false
+            [ meta, [ fastq_1, fastq_2 ] ]
+        }
+        .set { paired_reads }
+
+    // Process SRA files
+    input_ch.sra
+        .map { meta, fastq_1, fastq_2, sra_id ->
+            [ meta, sra_id ]
+        }
+        .set { sra_ids }
+
+    // Download and process SRA files
+    AWS_DOWNLOAD(sra_ids)
+    FASTERQ_DUMP(AWS_DOWNLOAD.out.sra_file)
+
+    // Merge all read channels
+    reads_ch = Channel.empty()
+        .mix(local_reads)
+        .mix(paired_reads)
+        .mix(FASTERQ_DUMP.out.reads)
+
+  clean_reads(reads_ch)
   merged_reads = clean_reads.out.reads_cleaned
 
   // profile taxa

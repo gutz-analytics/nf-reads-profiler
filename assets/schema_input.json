@@ -14,21 +14,38 @@
         "meta": ["id"]
       },
       "fastq_1": {
-        "type": "string",
+        "type": ["string", "null"],
         "pattern": "^\\S+\\.f(ast)?q\\.gz$",
-        "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+        "errorMessage": "FastQ file for reads 1 must be provided (unless using SRA), cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
       },
       "fastq_2": {
+        "type": ["string", "null"],
         "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
-        "type": "string",
         "pattern": "^\\S+\\.f(ast)?q\\.gz$"
+      },
+      "sra_accession": {
+        "type": ["string", "null"],
+        "pattern": "^[ESD]RR[0-9]+$",
+        "errorMessage": "SRA accession must be in [E,S,D]RR format (e.g., DRR326974)",
+        "description": "SRA run accession (xRR format)"
       },
       "study_accession": {
         "type": "string",
-        "errorMessage": "Run accession must be provided",
+        "errorMessage": "Study accession must be provided",
         "meta": ["run"]
       }
     },
-    "required": ["sample", "fastq_1", "study_accession"]
+    "required": ["sample", "study_accession"],
+    "anyOf": [
+      {
+        "required": ["fastq_1"]
+      },
+      {
+        "required": ["sra_accession"]
+      }
+    ],
+    "errorMessage": {
+      "anyOf": "Either fastq_1 or sra_accession must be provided"
+    }
   }
 }
