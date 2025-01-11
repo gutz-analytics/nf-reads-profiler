@@ -172,43 +172,6 @@ def output_exists(meta) {
 }
 
 
-workflow PIPELINE_INITIALISATION {
-  // adapted from taxprofiler
-  take:
-  input             //  string: Path to input samplesheet
-
-  main:
-  //
-  // Create channel from input file provided through params.input
-  //
-  // ch_input = samplesheet
-  //     .map { meta, run_accession, instrument_platform, fastq_1, fastq_2, fasta ->
-  //         meta.run_accession = run_accession
-  //         meta.instrument_platform = instrument_platform
-
-  //         // Define single_end based on the conditions
-  //         meta.single_end = ( fastq_1 && !fastq_2 && instrument_platform != 'OXFORD_NANOPORE' )
-
- 
-  Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
-      .map { meta, fastq_1, fastq_2 ->
-        meta.single_end = ( fastq_1 && !fastq_2 )
-        if ( !fastq_2 ) {
-          reads = [fastq_1]
-        }
-        else {
-          reads = [fastq_1, fastq_2]
-        }
-        return [meta, reads]
-      }
-      .set { input }
-  
-  // ch_samplesheet = input.single.mix(input.paired)
-
-  emit:
-  ch_input = input
-}
-
 workflow {
   // Parse input samplesheet using nf-validation plugin
   Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
