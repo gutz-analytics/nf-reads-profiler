@@ -210,46 +210,47 @@ workflow PIPELINE_INITIALISATION {
 }
 
 workflow {
-    // Parse input samplesheet using nf-validation plugin
-    Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
-        .branch {
-            local: it[1] && (!it[2] || it[2] == '')  // Has fastq_1 but no or empty fastq_2
-            paired: it[1] && it[2]                    // Has both fastq_1 and fastq_2
-            sra: !it[1] && it[3] =~ /^[ESD]RR[0-9]+$/    // No fastq files but has DRR accession
-        }
-        .set { input_ch }
+  // Parse input samplesheet using nf-validation plugin
+  Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+      .branch {
+          local: it[1]                                    // Has fastq_1 defined
+          sra: !it[1] && it[3] =~ /^[ESD]RR[0-9]+$/     // No local files but has SRA accession
+      }
+      .set { input_ch }
 
-    // Process local files
-    input_ch.local
-        .map { meta, fastq_1, fastq_2, sra_id -> 
-            meta.single_end = true
-            [ meta, [ fastq_1 ] ]
-        }
-        .set { local_reads }
+  // Process local files
+  input_ch.local
+      .map { meta, fastq_1, fastq_2, sra_id -> 
+          meta.single_end = !fastq_2  // true if fastq_2 is empty/null
+          fastq_2 ? [ meta, [ fastq_1, fastq_2 ] ] : [ meta, [ fastq_1 ] ]
+      }
+      .set { local_reads }
 
-    input_ch.paired
-        .map { meta, fastq_1, fastq_2, sra_id ->
-            meta.single_end = false
-            [ meta, [ fastq_1, fastq_2 ] ]
-        }
-        .set { paired_reads }
+  // Process SRA files - only for samples without local files
+  input_ch.sra
+      .map { meta, fastq_1, fastq_2, sra_id ->
+          [ meta, sra_id ]
+      }
+      .set { sra_ids }
 
-    // Process SRA files
-    input_ch.sra
-        .map { meta, fastq_1, fastq_2, sra_id ->
-            [ meta, sra_id ]
-        }
-        .set { sra_ids }
+  AWS_DOWNLOAD(sra_ids)
 
-    // Download and process SRA files
-    AWS_DOWNLOAD(sra_ids)
-    FASTERQ_DUMP(AWS_DOWNLOAD.out.sra_file)
+  def sortReads = { reads -> 
+      reads.sort() 
+  }
 
-    // Merge all read channels
-    reads_ch = Channel.empty()
-        .mix(local_reads)
-        .mix(paired_reads)
-        .mix(FASTERQ_DUMP.out.reads)
+  FASTERQ_DUMP(AWS_DOWNLOAD.out.sra_file)
+      .reads
+      .map { meta, reads -> 
+          meta.single_end = reads.size() == 1
+          [ meta, sortReads(reads) ]
+      }
+      .set { sra_reads }
+
+  // Merge all read channels
+  reads_ch = Channel.empty()
+      .mix(local_reads)
+      .mix(sra_reads)
 
   clean_reads(reads_ch)
   merged_reads = clean_reads.out.reads_cleaned

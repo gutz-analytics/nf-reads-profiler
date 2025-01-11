@@ -5,9 +5,18 @@ nextflow_pipeline {
     
     test("Should run paired-end analysis with local files") {
         tag "local"
+        setup {
+            // Create samplesheet with SRA accessions
+            def samplesheet = file("$outputDir/samplesheet-local.csv")
+            samplesheet.text = """sample,fastq_1,fastq_2,study_accession
+test_pe_1,$projectDir/assets/test_data/SRX122150_SRR413772_1.fastq.gz,$projectDir/assets/test_data/SRX122150_SRR413772_2.fastq.gz,STUDY1
+test_pe_2,$projectDir/assets/test_data/SRX122151_SRR413773_1.fastq.gz,$projectDir/assets/test_data/SRX122151_SRR413773_2.fastq.gz,STUDY1
+test_pe_3,$projectDir/assets/test_data/SRX4954909_SRR8133838_1.fastq.gz,$projectDir/assets/test_data/SRX4954909_SRR8133838_2.fastq.gz,STUDY2
+test_pe_4,$projectDir/assets/test_data/SRX4954910_SRR8133837_1.fastq.gz,$projectDir/assets/test_data/SRX4954910_SRR8133837_2.fastq.gz,STUDY2"""
+        }
         when {
             params {
-                input = "$projectDir/assets/samplesheet-test-local.csv"
+                input = "$outputDir/samplesheet-local.csv"
                 project = "test_pe"
                 outdir = "$outputDir"
                 annotation = true
@@ -107,8 +116,8 @@ test_sra_2,,,SRR6664342,STUDY_SRA"""
             // Create samplesheet with both local files and SRA accessions
             def samplesheet = file("$outputDir/samplesheet-mixed.csv")
             samplesheet.text = """sample,fastq_1,fastq_2,sra_accession,study_accession
-test_local,$projectDir/test_data/SRX122150_SRR413772_1.fastq.gz,$projectDir/test_data/SRX122150_SRR413772_2.fastq.gz,,STUDY_MIXED
-test_sra,,,DRR326974,STUDY_MIXED"""
+test_local,$projectDir/assets/test_data/SRX122150_SRR413772_1.fastq.gz,$projectDir/assets/test_data/SRX122150_SRR413772_2.fastq.gz,,STUDY_MIXED
+test_sra,,,SRR6664374,STUDY_MIXED"""
         }
 
         when {
