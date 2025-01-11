@@ -3,9 +3,7 @@ process AWS_DOWNLOAD {
     label 'process_low'
 
     conda "conda-forge::awscli"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/awscli:1.29.49' :
-        'quay.io/biocontainers/awscli:1.29.49' }"
+    container params.docker_container_aws
 
     input:
     tuple val(meta), val(sra_id)
@@ -30,9 +28,7 @@ process FASTERQ_DUMP {
     label 'process_medium'
 
     conda "bioconda::sra-tools=3.0.8"
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/sra-tools:3.0.8--h9f5acd7_0' :
-        'biocontainers/sra-tools:3.0.8--h9f5acd7_0' }"
+    container params.docker_container_sra
 
     input:
     tuple val(meta), path(sra_file)
