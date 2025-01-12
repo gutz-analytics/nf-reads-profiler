@@ -14,7 +14,7 @@ process AWS_DOWNLOAD {
 
     script:
     """
-    aws s3 cp s3://sra-pub-run-odp/sra/${sra_id}/${sra_id} ${sra_id} --no-sign-request
+    aws s3 cp --region ${params.aws_region} s3://sra-pub-run-odp/sra/${sra_id}/${sra_id} ${sra_id} --no-sign-request
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
