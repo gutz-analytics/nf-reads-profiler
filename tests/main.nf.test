@@ -64,6 +64,37 @@ test_pe_4,$projectDir/assets/test_data/SRX4954910_SRR8133837_1.fastq.gz,$project
         }
     }
 
+    test("Should filter samples with too few reads") {
+        tag "read_filter"
+        when {
+            params {
+                input = "$projectDir/assets/samplesheet-test-local-filter.csv"
+                project = "test_filter"
+                outdir = "$outputDir"
+                annotation = true
+                minreads = 5000  // Set threshold above the filtered sample's read count
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Check that read counts are generated for all samples
+                { assert path("$outputDir/test_filter/STUDY1/test_pe_1_readcount.txt").exists() },
+                { assert path("$outputDir/test_filter/STUDY1/test_pe_2_readcount.txt").exists() },
+                { assert path("$outputDir/test_filter/STUDY1/test_pe_smol_1_readcount.txt").exists() },
+                
+                // Verify read counts
+                { assert path("$outputDir/test_filter/STUDY1/test_pe_smol_1_readcount.txt").text.trim().toInteger() < 5000 },
+                
+                // Check that only passing samples are processed
+                { assert path("$outputDir/test_filter/STUDY1/taxa/test_pe_1_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_filter/STUDY1/taxa/test_pe_2_metaphlan_bugs_list.tsv").exists() },
+                { assert !path("$outputDir/test_filter/STUDY1/taxa/test_pe_smol_1_metaphlan_bugs_list.tsv").exists() }
+            )
+        }
+    }
+
     test("Should run analysis with SRA download") {
         tag "SRA"
         setup {
@@ -139,6 +170,58 @@ test_sra,,,SRR6664374,STUDY_MIXED"""
                 { assert path("$outputDir/test_mixed/STUDY_MIXED/taxa/test_local_metaphlan_bugs_list.tsv").exists() },
                 { assert path("$outputDir/test_mixed/STUDY_MIXED/taxa/test_sra_metaphlan_bugs_list.tsv").exists() },
                 { assert path("$outputDir/test_mixed/STUDY_MIXED/function/STUDY_MIXED_genefamilies_combined.tsv").exists() }
+            )
+        }
+    }
+
+    test("Should handle SRA sample with three output files correctly") {
+        tag "sra-three-files"
+
+        setup {
+            // Create samplesheet with SRR17001000 which produces 3 files
+            def samplesheet = file("$outputDir/samplesheet-sra-three.csv")
+            samplesheet.text = """sample,fastq_1,fastq_2,sra_accession,study_accession
+    test_sra_triple,,,SRR17001000,STUDY1"""
+        }
+
+        when {
+            params {
+                input = "$outputDir/samplesheet-sra-three.csv"
+                project = "test_sra_three"
+                outdir = "$outputDir"
+                annotation = true
+            }
+        }
+
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                
+                // Check that SRA download worked and produced expected files
+                { assert path("$outputDir/test_sra_three/STUDY1/taxa").exists() },
+                { assert path("$outputDir/test_sra_three/STUDY1/taxa/test_sra_triple_metaphlan_bugs_list.tsv").exists() },
+                
+                // Find the FASTERQ_DUMP work directory and verify its outputs
+                { 
+                    def fasterq_dirs = workflow.trace.tasks()
+                        .findAll { it.name == 'FASTERQ_DUMP' }
+                        .collect { it.workDir }
+                    
+                    assert fasterq_dirs.size() == 1
+                    
+                    def processed_dir = path("${fasterq_dirs[0]}/processed")
+                    assert processed_dir.exists()
+                    
+                    def processed_files = processed_dir.listFiles()
+                        .collect { it.name }
+                        .sort()
+                    
+                    // Verify we got exactly two reads and they're in the correct order
+                    assert processed_files.size() == 2
+                    assert processed_files[0].endsWith('_1.fastq.gz')
+                    assert processed_files[1].endsWith('_2.fastq.gz')
+                }
             )
         }
     }
