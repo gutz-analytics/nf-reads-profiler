@@ -37,6 +37,31 @@ process get_software_versions {
 }
 
 
+process count_reads {
+  tag "$name"
+  
+  container params.docker_container_fastp
+  
+  publishDir "${params.outdir}/${params.project}/${run}", mode: 'copy', pattern: "*_readcount.txt"
+
+  input:
+  tuple val(meta), path(reads)
+
+  output:
+  tuple val(meta), path(reads), env(READ_COUNT), emit: read_info
+  tuple val(meta), path("${name}_readcount.txt"), emit: read_count
+  
+  script:
+  name = task.ext.name ?: "${meta.id}"
+  run = task.ext.run ?: "${meta.run}"
+  """
+  # Count sequences in first read file (divide line count by 4 since FASTQ has 4 lines per read)
+  READ_COUNT=\$(zcat ${reads[0]} | echo \$((`wc -l`/4)))
+  echo \$READ_COUNT > ${name}_readcount.txt
+  """
+}
+
+
 process clean_reads {
   tag "$name"
   label "fastp"

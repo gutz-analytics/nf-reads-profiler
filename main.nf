@@ -3,7 +3,7 @@
 nextflow.enable.dsl=2
 
 include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables } from './modules/community_characterisation'
-include { MULTIQC; get_software_versions; clean_reads} from './modules/house_keeping'
+include { MULTIQC; get_software_versions; clean_reads; count_reads} from './modules/house_keeping'
 include { AWS_DOWNLOAD; FASTERQ_DUMP  } from './modules/data_handling'
 include { samplesheetToList } from 'plugin/nf-schema'
 
@@ -215,7 +215,26 @@ workflow {
       .mix(local_reads)
       .mix(sra_reads)
 
-  clean_reads(reads_ch)
+    // Count reads and filter samples
+    count_reads(reads_ch)
+    
+    // Split into passing and failing samples based on read count
+    count_reads.out.read_info
+        .branch {
+            pass: it[2].toInteger() >= params.minreads
+            fail: true
+        }
+        .set { read_check }
+    
+    // Log filtered samples
+    read_check.fail
+        .map { meta, reads, count -> 
+            log.info "Skipping sample ${meta.id} due to insufficient reads: ${count} < ${params.minreads}"
+        }
+
+    // Process passing samples
+    clean_reads(read_check.pass.map { meta, reads, count -> [meta, reads] })
+
   merged_reads = clean_reads.out.reads_cleaned
 
   // profile taxa
