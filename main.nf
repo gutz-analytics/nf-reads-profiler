@@ -202,13 +202,23 @@ workflow {
       reads.sort() 
   }
 
+  // FASTERQ_DUMP(AWS_DOWNLOAD.out.sra_file)
+  //     .reads
+  //     .map { meta, reads -> 
+  //         meta.single_end = reads.size() == 1
+  //         [ meta, sortReads(reads) ]
+  //     }
+  //     .set { sra_reads }
   FASTERQ_DUMP(AWS_DOWNLOAD.out.sra_file)
-      .reads
-      .map { meta, reads -> 
-          meta.single_end = reads.size() == 1
-          [ meta, sortReads(reads) ]
-      }
-      .set { sra_reads }
+    .reads
+    .map { meta, raw_reads ->
+        // If raw_reads is a single Path, wrap it in a list
+        def reads = (raw_reads instanceof List) ? raw_reads : [ raw_reads ]
+
+        meta.single_end = (reads.size() == 1)
+        [ meta, reads.sort() ]
+    }
+    .set { sra_reads }
 
   // Merge all read channels
   reads_ch = Channel.empty()

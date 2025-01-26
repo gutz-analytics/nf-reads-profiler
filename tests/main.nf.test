@@ -174,6 +174,42 @@ test_sra,,,SRR6664374,STUDY_MIXED"""
         }
     }
 
+
+    test("Should handle mixed local and SRA inputs with single-ended") {
+        tag "SRA and local combined ended"
+        setup {
+            // Create samplesheet with both local files and SRA accessions
+            def samplesheet = file("$outputDir/samplesheet-mixed-12.csv")
+            samplesheet.text = """sample,fastq_1,fastq_2,sra_accession,study_accession
+test_local,$projectDir/assets/test_data/SRX122150_SRR413772_1.fastq.gz,$projectDir/assets/test_data/SRX122150_SRR413772_2.fastq.gz,,STUDY_MIXED
+test_sra_double,,,SRR6664374,STUDY_MIXED
+test_sra_single,,,ERR4775947,STUDY_MIXED
+"""
+        }
+
+        when {
+            params {
+                input = "$outputDir/samplesheet-mixed-12.csv"
+                project = "test_mixed"
+                outdir = "$outputDir"
+                annotation = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/taxa").exists() },
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/function").exists() },
+                
+                // Check both local and downloaded files are processed
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/taxa/test_local_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/taxa/test_sra_metaphlan_bugs_list.tsv").exists() },
+                { assert path("$outputDir/test_mixed/STUDY_MIXED/function/STUDY_MIXED_genefamilies_combined.tsv").exists() }
+            )
+        }
+    }
+
     test("Should handle SRA sample with three output files correctly") {
         tag "sra-three-files"
 
