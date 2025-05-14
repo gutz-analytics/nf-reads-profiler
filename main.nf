@@ -29,6 +29,7 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
 
   Main options:
     --singleEnd  <true|false>   whether the layout is single-end
+    --skipHumann <true|false>   skip HUMAnN3 functional profiling and downstream steps (default: false)
 
   Other options:
   MetaPhlAn parameters for taxa profiling:
@@ -62,6 +63,8 @@ if (params.help) {
   exit 0
 }
 
+// Ensure skipHumann is a boolean
+params.skipHumann = params.skipHumann ? params.skipHumann.toString().toBoolean() : false
 
 //Creates working dir
 workingpath = params.outdir + "/" + params.project
@@ -252,41 +255,41 @@ workflow {
 
 
   ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
-  // profile function
-  // profile_function(ch_filtered_reads, profile_taxa.out.to_profile_function_bugs)
-  // !-->
+  
 
-  // // profile function
-  profile_function(merged_reads, profile_taxa.out.to_profile_function_bugs)
+  // Functional profiling (HUMAnN3) if not skipped
+  if ( ! params.skipHumann ) {
+    profile_function(merged_reads, profile_taxa.out.to_profile_function_bugs)
 
-
-  // regroup metadata
-  ch_genefamilies = profile_function.out.profile_function_gf
-              .map {
-                meta, table ->
+    ch_genefamilies = profile_function.out.profile_function_gf
+                .map { meta, table ->
                     def meta_new = meta - meta.subMap('id')
-                meta_new.put('type','genefamilies')
-                [ meta_new, table ]
-              }
-              .groupTuple()
-  ch_pathabundance = profile_function.out.profile_function_pa
-              .map {
-                meta, table ->
+                    meta_new.put('type','genefamilies')
+                    [ meta_new, table ]
+                }
+                .groupTuple()
+
+    ch_pathabundance = profile_function.out.profile_function_pa
+                .map { meta, table ->
                     def meta_new = meta - meta.subMap('id')
-                meta_new.put('type','pathabundance')
-                [ meta_new, table ]
-              }
-              .groupTuple()
-  ch_pathcoverage = profile_function.out.profile_function_pc
-            .map {
-              meta, table ->
-                  def meta_new = meta - meta.subMap('id')
-              meta_new.put('type','pathcoverage')
-              [ meta_new, table ]
-            }
-            .groupTuple()
+                    meta_new.put('type','pathabundance')
+                    [ meta_new, table ]
+                }
+                .groupTuple()
+
+    ch_pathcoverage = profile_function.out.profile_function_pc
+                .map { meta, table ->
+                    def meta_new = meta - meta.subMap('id')
+                    meta_new.put('type','pathcoverage')
+                    [ meta_new, table ]
+                }
+                .groupTuple()
+
+    combine_humann_tables(ch_genefamilies.mix(ch_pathcoverage, ch_pathabundance))
+  }
 
 
+  // Metaphlan
   ch_metaphlan = profile_taxa.out.to_profile_function_bugs
             .map {
               meta, table ->
@@ -294,15 +297,16 @@ workflow {
               [ meta_new, table ]
             }
             .groupTuple()
-            .dump(tag: 'foo')
             
-  combine_humann_tables(ch_genefamilies.mix(ch_pathcoverage, ch_pathabundance))
   combine_metaphlan_tables(ch_metaphlan)
 
+  // MultiQC setup
   ch_multiqc_files = Channel.empty()
   ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log.ifEmpty([]))
   ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
-  ch_multiqc_files = ch_multiqc_files.concat(profile_function.out.profile_function_log.ifEmpty([]))
+  if ( ! params.skipHumann ) {
+    ch_multiqc_files = ch_multiqc_files.concat(profile_function.out.profile_function_log.ifEmpty([]))
+  }
   
 
   ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
