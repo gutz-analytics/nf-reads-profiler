@@ -257,14 +257,22 @@ workflow {
   ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
   
 
-  // Functional profiling (HUMAnN3) if not skipped
+  // Functional profiling (HUMAnN4) if not skipped
   if ( ! params.skipHumann ) {
-    profile_function(merged_reads, profile_taxa.out.to_profile_function_bugs)
+    profile_function(merged_reads)
 
     ch_genefamilies = profile_function.out.profile_function_gf
                 .map { meta, table ->
                     def meta_new = meta - meta.subMap('id')
                     meta_new.put('type','genefamilies')
+                    [ meta_new, table ]
+                }
+                .groupTuple()
+
+    ch_reactions = profile_function.out.profile_function_reactions
+                .map { meta, table ->
+                    def meta_new = meta - meta.subMap('id')
+                    meta_new.put('type','reactions')
                     [ meta_new, table ]
                 }
                 .groupTuple()
@@ -277,15 +285,16 @@ workflow {
                 }
                 .groupTuple()
 
-    ch_pathcoverage = profile_function.out.profile_function_pc
+    // HUMAnN-generated taxonomy profiles (separate from independent MetaPhlAn)
+    ch_humann_taxonomy = profile_function.out.profile_function_metaphlan
                 .map { meta, table ->
                     def meta_new = meta - meta.subMap('id')
-                    meta_new.put('type','pathcoverage')
+                    meta_new.put('type','metaphlan_profile')
                     [ meta_new, table ]
                 }
                 .groupTuple()
 
-    combine_humann_tables(ch_genefamilies.mix(ch_pathcoverage, ch_pathabundance))
+    combine_humann_tables(ch_genefamilies.mix(ch_reactions, ch_pathabundance, ch_humann_taxonomy))
   }
 
 

@@ -23,7 +23,6 @@ process profile_taxa {
   tuple val(meta), path(reads)
 
   output:
-  tuple val(meta), path("*.biom")
   tuple val(meta), path("*_metaphlan_bugs_list.tsv"), emit: to_profile_function_bugs
   tuple val(meta), path("*_profile_taxa_mqc.yaml"), emit: profile_taxa_log
 
@@ -40,14 +39,11 @@ process profile_taxa {
   metaphlan \\
     --input_type fastq \\
     --tmp_dir . \\
-    --biom ${name}.biom \\
     --index ${params.metaphlan_index} \\
-    --bowtie2db ${params.metaphlan_db} \\
+    --db_dir ${params.metaphlan_db} \\
     --bt2_ps ${params.bt2options} \\
-    --add_viruses \\
     --sample_id ${name} \\
     --nproc ${task.cpus} \\
-    --unclassified_estimation \\
     --no_map \\
     $reads \\
     ${name}_metaphlan_bugs_list.tsv 1> profile_taxa_mqc.txt
@@ -72,19 +68,19 @@ process profile_function {
   tag "$name"
 
   //Enable multicontainer settings
-  container params.docker_container_humann3
+  container params.docker_container_humann4
 
   publishDir {"${params.outdir}/${params.project}/${run}/function" }, mode: 'copy', pattern: "*.{tsv,log}"
 
   input:
   tuple val(meta), path(reads)
-  tuple val(meta), path(metaphlan_bug_list)
 
   output:
-  tuple val(meta), path("*_HUMAnN.log")
-  tuple val(meta), path("*_genefamilies.tsv"), emit: profile_function_gf
-  tuple val(meta), path("*_pathcoverage.tsv"), emit: profile_function_pc
-  tuple val(meta), path("*_pathabundance.tsv"), emit: profile_function_pa
+  tuple val(meta), path("*_0.log"), emit: profile_function_log_main
+  tuple val(meta), path("*_1_metaphlan_profile.tsv"), emit: profile_function_metaphlan
+  tuple val(meta), path("*_2_genefamilies.tsv"), emit: profile_function_gf
+  tuple val(meta), path("*_3_reactions.tsv"), emit: profile_function_reactions
+  tuple val(meta), path("*_4_pathabundance.tsv"), emit: profile_function_pa
   tuple val(meta), path("*_profile_functions_mqc.yaml"), emit: profile_function_log
 
   when:
@@ -94,24 +90,22 @@ process profile_function {
   name = task.ext.name ?: "${meta.id}"
   run = task.ext.run ?: "${meta.run}"
   """
-  head -n 3 ${metaphlan_bug_list}
-  ls -lhtr ${metaphlan_bug_list}
-  #HUMAnN will use the list of species detected by the profile_taxa process
+  # HUMAnN 4 will run its own MetaPhlAn profiling internally
   humann \\
     --input $reads \\
     --output . \\
     ${params.humann_params} \\
     --output-basename ${name} \\
-    --taxonomic-profile ${metaphlan_bug_list} \\
     --nucleotide-database ${params.chocophlan} \\
     --protein-database ${params.uniref} \\
+    --utility-database ${params.utility_mapping} \\
     --pathways metacyc \\
     --threads ${task.cpus} \\
-    --memory-use minimum &> ${name}_HUMAnN.log
+    --memory-use minimum
 
   # MultiQC doesn't have a module for humann yet. As a consequence, I
   # had to create a YAML file with all the info I need via a bash script
-  bash scrape_profile_functions.sh ${name} ${name}_HUMAnN.log > ${name}_profile_functions_mqc.yaml
+  bash scrape_profile_functions.sh ${name} ${name}_0.log > ${name}_profile_functions_mqc.yaml
   """
 }
 
@@ -119,7 +113,7 @@ process profile_function {
 process combine_humann_tables {
   tag "$run"
 
-  container params.docker_container_humann3
+  container params.docker_container_humann4
 
   publishDir {"${params.outdir}/${params.project}/${run}/function" }, mode: 'copy', pattern: "*.{tsv,log}"
   
