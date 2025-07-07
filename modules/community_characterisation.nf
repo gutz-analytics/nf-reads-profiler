@@ -99,6 +99,7 @@ process profile_function {
     --nucleotide-database ${params.chocophlan} \\
     --protein-database ${params.uniref} \\
     --utility-database ${params.utility_mapping} \\
+    --metaphlan-options "-t rel_ab_w_read_stats --index ${params.humann_metaphlan_index} --bowtie2db ${params.humann_metaphlan_db} --bt2_ps ${params.bt2options}" \\
     --pathways metacyc \\
     --threads ${task.cpus} \\
     --memory-use minimum
