@@ -2,7 +2,7 @@
 
 nextflow.enable.dsl=2
 
-include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables } from './modules/community_characterisation'
+include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables; process_humann_tables } from './modules/community_characterisation'
 include { MULTIQC; get_software_versions; clean_reads; count_reads} from './modules/house_keeping'
 include { AWS_DOWNLOAD; FASTERQ_DUMP  } from './modules/data_handling'
 include { samplesheetToList } from 'plugin/nf-schema'
@@ -294,7 +294,16 @@ workflow {
                 }
                 .groupTuple()
 
-    combine_humann_tables(ch_genefamilies.mix(ch_reactions, ch_pathabundance, ch_humann_taxonomy))
+    combine_humann_tables(ch_genefamilies.mix(ch_reactions, ch_pathabundance))
+    
+    // Process HUMAnN tables if enabled
+    if (params.process_humann_tables) {
+      // Use only the genefamilies combined tables for processing
+      ch_combined_genefamilies = combine_humann_tables.out.filter { meta, table -> 
+        meta.type == 'genefamilies' 
+      }
+      process_humann_tables(ch_combined_genefamilies)
+    }
   }
 
 

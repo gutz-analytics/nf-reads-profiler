@@ -134,10 +134,27 @@ process combine_humann_tables {
   run = task.ext.run ?: "${meta.run}"
   type = task.ext.type ?: "${meta.type}"
   """
+  echo "Combining ${type} tables..."
+  echo "Files to combine:"
+  ls -la *${type}*
+  
+  # Check for empty or malformed files
+  for file in *${type}*; do
+    if [ -s "\$file" ]; then
+      echo "File \$file size: \$(wc -l < "\$file") lines"
+      echo "First few lines of \$file:"
+      head -n 5 "\$file"
+    else
+      echo "Warning: \$file is empty or does not exist"
+    fi
+  done
+  
+  # Try to combine tables with verbose output
   humann_join_tables \\
     -i ./ \\
     -o ${run}_${type}_combined.tsv \\
-    --file_name ${type}
+    --file_name ${type} \\
+    --verbose
   """
 }
 
@@ -159,6 +176,59 @@ process combine_metaphlan_tables {
   """
   merge_metaphlan_tables.py ${table} \\
     -o ${run}_bugs_list_combined.tsv
+  """
+}
+
+process process_humann_tables {
+  tag "$run"
+
+  container params.docker_container_humann4
+
+  publishDir {"${params.outdir}/${params.project}/${run}/function/processed" }, mode: 'copy', pattern: "*.{biom,tsv}"
+  
+  input:
+  tuple val(meta), path(table)
+
+  output:
+  tuple val(meta), path("*.biom"), emit: biom_tables
+  tuple val(meta), path("unstratified/*.tsv"), emit: unstratified_tables, optional: true
+
+  when:
+  params.annotation && params.process_humann_tables
+
+  script:
+  run = task.ext.run ?: "${meta.run}"
+  regroups = params.humann_regroups ?: "uniref90_ko,uniref90_rxn"
+  """
+  # Create output directory for unstratified tables
+  mkdir -p unstratified
+
+  # Convert to biom format
+  echo "Converting HUMAnN table to biom"
+  biom convert \\
+    --input-fp ${table} \\
+    --output-fp ${run}_genefamilies.biom \\
+    --table-type 'Function table' \\
+    --to-hdf5
+
+  # Process each regroup type
+  IFS=',' read -r -a groups <<< "${regroups}"
+  for group in "\${groups[@]}"; do
+    echo "Regrouping to \$group"
+    
+    # Regroup table
+    humann_regroup_table \\
+      -i ${run}_genefamilies.biom \\
+      -g \$group \\
+      -o ${run}_genefamilies.\${group}.biom
+
+    # Split stratified tables
+    humann_split_stratified_table \\
+      -i ${run}_genefamilies.\${group}.biom \\
+      -o unstratified
+  done
+
+  echo "Processing complete"
   """
 }
 
