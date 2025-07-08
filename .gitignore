@@ -3,3 +3,4 @@
 work/
 test/
 .DS_Store
+.nf-test*
