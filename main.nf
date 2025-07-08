@@ -312,7 +312,7 @@ workflow {
   // MultiQC setup
   ch_multiqc_files = Channel.empty()
   ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log.ifEmpty([]))
-  ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
+  // ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
   if ( ! params.skipHumann ) {
     ch_multiqc_files = ch_multiqc_files.concat(profile_function.out.profile_function_log.ifEmpty([]))
   }
