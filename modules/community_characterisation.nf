@@ -23,8 +23,8 @@ process profile_taxa {
   tuple val(meta), path(reads)
 
   output:
-  tuple val(meta), path("*_metaphlan_bugs_list.tsv"), emit: to_profile_function_bugs
-  tuple val(meta), path("*_profile_taxa_mqc.yaml"), emit: profile_taxa_log
+  tuple val(meta), path("*_metaphlan.biom"), emit: to_profile_function_bugs
+  // tuple val(meta), path("*_profile_taxa_mqc.yaml"), emit: profile_taxa_log
 
 
   when:
@@ -43,14 +43,16 @@ process profile_taxa {
     --db_dir ${params.metaphlan_db} \\
     --bt2_ps ${params.bt2options} \\
     --sample_id ${name} \\
+    --biom_format_output \\
     --nproc ${task.cpus} \\
     --no_map \\
+    --output_file ${name}_metaphlan.biom \\
     $reads \\
-    ${name}_metaphlan_bugs_list.tsv 1> profile_taxa_mqc.txt
+    
 
   # MultiQC doesn't have a module for Metaphlan yet. As a consequence, I
   # had to create a YAML pathwith all the info I need via a bash script
-  bash scrape_profile_taxa_log.sh ${name}_metaphlan_bugs_list.tsv > ${name}_profile_taxa_mqc.yaml
+  # bash scrape_profile_taxa_log.sh ${name}_metaphlan_bugs_list.tsv > ${name}_profile_taxa_mqc.yaml
   """
 }
 
