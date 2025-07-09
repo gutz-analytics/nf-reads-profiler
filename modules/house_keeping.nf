@@ -42,7 +42,7 @@ process count_reads {
   
   container params.docker_container_fastp
   
-  publishDir "${params.outdir}/${params.project}/${run}", mode: 'copy', pattern: "*_readcount.txt"
+  publishDir "${params.outdir}/${params.project}/${run}/readcount", mode: 'copy', pattern: "*_readcount.txt"
 
   input:
   tuple val(meta), path(reads)

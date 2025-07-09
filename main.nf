@@ -2,7 +2,7 @@
 
 nextflow.enable.dsl=2
 
-include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables; process_humann_tables } from './modules/community_characterisation'
+include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables; combine_humann_taxonomy_tables; process_humann_tables; convert_tables_to_biom; split_stratified_tables } from './modules/community_characterisation'
 include { MULTIQC; get_software_versions; clean_reads; count_reads} from './modules/house_keeping'
 include { AWS_DOWNLOAD; FASTERQ_DUMP  } from './modules/data_handling'
 include { samplesheetToList } from 'plugin/nf-schema'
@@ -296,6 +296,24 @@ workflow {
 
     combine_humann_tables(ch_genefamilies.mix(ch_reactions, ch_pathabundance))
     
+    // Also combine HUMAnN-generated taxonomy profiles
+    combine_humann_taxonomy_tables(ch_humann_taxonomy)
+    
+    // Convert pathabundance and reactions tables to biom format
+    ch_tables_for_biom = combine_humann_tables.out.filter { meta, table -> 
+      meta.type == 'pathabundance' || meta.type == 'reactions'
+    }
+    
+    // Add combined HUMAnN taxonomy tables to biom conversion
+    ch_humann_taxonomy_for_biom = combine_humann_taxonomy_tables.out.combined_tsv
+                .map { meta, table ->
+                    def meta_new = meta.clone()
+                    meta_new.put('type','humann_taxonomy')
+                    [ meta_new, table ]
+                }
+    
+    convert_tables_to_biom(ch_tables_for_biom.mix(ch_humann_taxonomy_for_biom))
+    
     // Process HUMAnN tables if enabled
     if (params.process_humann_tables) {
       // Use only the genefamilies combined tables for processing
@@ -317,6 +335,39 @@ workflow {
             .groupTuple()
             
   combine_metaphlan_tables(ch_metaphlan)
+
+  // Split stratified tables for biom files
+  if (!params.skipHumann && params.annotation) {
+    // Start with biom files from convert_tables_to_biom (pathabundance and reactions)
+    ch_bioms_for_splitting = convert_tables_to_biom.out.biom_files
+    
+    // Add regrouped biom tables if processing is enabled
+    if (params.process_humann_tables) {
+      // Add genefamilies biom with proper meta.type
+      ch_genefamilies_biom = process_humann_tables.out.genefamilies_biom
+        .map { meta, biom -> 
+          def meta_new = meta.clone()
+          meta_new.put('type', 'genefamilies')
+          [meta_new, biom]
+        }
+      
+      // Add regrouped bioms with proper meta.type (flatten to handle multiple files)
+      ch_regrouped_bioms = process_humann_tables.out.regrouped_bioms
+        .transpose()
+        .map { meta, biom -> 
+          def meta_new = meta.clone()
+          meta_new.put('type', 'regrouped')
+          [meta_new, biom]
+        }
+      
+      ch_bioms_for_splitting = ch_bioms_for_splitting
+        .mix(ch_genefamilies_biom)
+        .mix(ch_regrouped_bioms)
+    }
+    
+    // Split each biom file individually
+    split_stratified_tables(ch_bioms_for_splitting)
+  }
 
   // MultiQC setup
   ch_multiqc_files = Channel.empty()
