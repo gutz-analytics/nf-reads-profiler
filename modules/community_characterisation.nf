@@ -263,16 +263,17 @@ process process_humann_tables {
     --table-type 'Function table' \\
     --to-hdf5
 
-  # Process each regroup type
+  # Process each regroup type using safe_regroup.py
   IFS=',' read -r -a groups <<< "${regroups}"
   for group in "\${groups[@]}"; do
-    echo "Regrouping to \$group"
+    echo "Regrouping to \$group using safe_regroup.py"
     
-    # Regroup table
-    humann_regroup_table \\
-      -i ${run}_genefamilies.biom \\
-      -g \$group \\
-      -o ${run}_genefamilies.\${group}.biom
+    # Use safe_regroup.py instead of humann_regroup_table
+    safe_regroup.py \\
+      ${run}_genefamilies.biom \\
+      \$group \\
+      ${run}_genefamilies.\${group}.biom \\
+      ${params.split_size ?: 100}
   done
 
   echo "Processing complete"
