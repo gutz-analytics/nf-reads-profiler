@@ -263,17 +263,24 @@ process process_humann_tables {
     --table-type 'Function table' \\
     --to-hdf5
 
-  # Process each regroup type using safe_regroup.py
+  # Process each regroup type using safe_cluster_process.py
   IFS=',' read -r -a groups <<< "${regroups}"
   for group in "\${groups[@]}"; do
-    echo "Regrouping to \$group using safe_regroup.py"
+    echo "Regrouping to \$group using safe_cluster_process.py"
     
-    # Use safe_regroup.py instead of humann_regroup_table
-    safe_regroup.py \\
+    # Use safe_cluster_process.py instead of safe_regroup.py
+    safe_cluster_process.py \\
       ${run}_genefamilies.biom \\
-      \$group \\
-      ${run}_genefamilies.\${group}.biom \\
-      ${params.split_size ?: 100}
+      "humann_regroup_table -i {input} -g \$group -o output_\${group}.biom" \\
+      --max-samples ${params.split_size ?: 100} \\
+      --final-output-dir . \\
+      --command-output-location . \\
+      --output-regex-patterns ".*\\.biom\$" \\
+      --output-group-names "\${group}" \\
+      --output-prefix ${run}_genefamilies
+      
+    # The output will be named ${run}_genefamilies_\${group}.biom, so rename it to expected format
+    mv ${run}_genefamilies_\${group}.biom ${run}_genefamilies.\${group}.biom
   done
 
   echo "Processing complete"
@@ -339,13 +346,19 @@ process split_stratified_tables {
   """
   echo "Splitting stratified table: ${biom_table} (type: ${type})"
   
-  # Split stratified table to get unstratified version
-  humann_split_stratified_table \\
-    -i ${biom_table} \\
-    -o .
+  # Use safe_cluster_process.py to handle memory issues with large tables
+  safe_cluster_process.py \\
+    ${biom_table} \\
+    "humann_split_stratified_table -i {input} -o ." \\
+    --max-samples ${params.split_size ?: 100} \\
+    --final-output-dir . \\
+    --command-output-location . \\
+    --output-regex-patterns ".*_stratified\\.biom\$" ".*_unstratified\\.biom\$" \\
+    --output-group-names "stratified" "unstratified" \\
+    --output-prefix ${run}_${type}
     
   # List what was created
-  echo "Unstratified files created:"
+  echo "Split files created:"
   ls -la *.biom
   """
 }
