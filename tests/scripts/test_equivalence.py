@@ -84,10 +84,10 @@ def test_humann_split_stratified_equivalence(test_data_dir, test_output_dir):
     print("TESTING: humann_split_stratified_table EQUIVALENCE")
     print("="*80)
     
-    # Use a subdirectory of the project for Docker compatibility
-    # Docker has issues with /tmp directories, so use project directory
+    # Use the dedicated test output directory
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    test_dir = os.path.join(project_root, "test_temp_split")
+    test_output_dir = os.path.join(project_root, "tests", "test_output")
+    test_dir = os.path.join(test_output_dir, "test_temp_split")
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -147,28 +147,14 @@ def test_humann_split_stratified_equivalence(test_data_dir, test_output_dir):
         # 2. Run with safe_cluster_process.py
         print("\\n2. Running safe_cluster_process.py...")
         
-        # Create wrapper script for Docker command
-        wrapper_script = os.path.join(test_dir, "docker_wrapper.sh")
-        with open(wrapper_script, 'w') as f:
-            f.write(f"""#!/bin/bash
-input_file="$1"
-input_dir=$(dirname "$input_file")
-input_basename=$(basename "$input_file")
-
-# Run the Docker command
-docker run --rm \\
-    -v "$input_dir":/input_data \\
-    -v "{cluster_output}":/output_data \\
-    gutzcontainers.azurecr.io/humann:4.0.0a1-1 \\
-    humann_split_stratified_table -i "/input_data/$input_basename" -o "/output_data"
-""")
-        os.chmod(wrapper_script, 0o755)
+        # Use the global wrapper script from tests/wrappers
+        wrapper_script = os.path.join(project_root, "tests", "wrappers", "humann_split_stratified_wrapper.sh")
         
         cluster_cmd = [
             "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
             temp_input,
             f"{wrapper_script} {{input}}",
-            "--max-samples", "1000",  # Large enough to not split (only 1 sample)
+            "--max-samples", "2",  # Force splitting if multi-sample data is used
             "--final-output-dir", test_dir,
             "--command-output-location", cluster_output,
             "--output-regex-patterns", ".*_stratified\\.biom$", ".*_unstratified\\.biom$",
@@ -245,7 +231,8 @@ def test_humann_regroup_equivalence(test_data_dir, test_output_dir):
     # Use a subdirectory of the project for Docker compatibility
     # Docker has issues with /tmp directories, so use project directory
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    test_dir = os.path.join(project_root, "test_temp_regroup")
+    test_output_dir = os.path.join(project_root, "tests", "test_output")
+    test_dir = os.path.join(test_output_dir, "test_temp_regroup")
     os.makedirs(test_dir, exist_ok=True)
     
     try:
@@ -289,27 +276,14 @@ def test_humann_regroup_equivalence(test_data_dir, test_output_dir):
         print("\\n2. Running safe_cluster_process.py...")
         
         # Create wrapper script for Docker command
-        wrapper_script = os.path.join(test_dir, "regroup_wrapper.sh")
-        with open(wrapper_script, 'w') as f:
-            f.write(f"""#!/bin/bash
-input_file="$1"
-input_dir=$(dirname "$input_file")
-input_basename=$(basename "$input_file")
-
-# Run the Docker command
-docker run --rm \\
-    -v "$input_dir":/input_data \\
-    -v "{test_dir}":/output_data \\
-    gutzcontainers.azurecr.io/humann:4.0.0a1-1 \\
-    humann_regroup_table -i "/input_data/$input_basename" -g {group_type} -o "/output_data/cluster_ko.biom"
-""")
-        os.chmod(wrapper_script, 0o755)
+        # Use the global wrapper script from tests/wrappers
+        wrapper_script = os.path.join(project_root, "tests", "wrappers", "humann_regroup_wrapper.sh")
         
         cluster_cmd = [
             "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
             temp_input,
             f"{wrapper_script} {{input}}",
-            "--max-samples", "1000",  # Large enough to not split (only 1 sample)
+            "--max-samples", "2",  # Force splitting if multi-sample data is used
             "--final-output-dir", test_dir,
             "--command-output-location", test_dir,
             "--output-regex-patterns", ".*_ko\\.biom$",

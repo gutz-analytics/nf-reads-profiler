@@ -24,11 +24,12 @@ def test_safe_cluster_process_validation(test_data_dir, test_output_dir):
         f.write(f"""#!/bin/bash
 # Simple test script that copies input to multiple outputs
 input_file="$1"
+input_dir=$(dirname "$input_file")
 base_name=$(basename "$input_file" .biom)
 
-# Create two output files to test regex matching in the validation output directory
-cp "$input_file" "{validation_output_dir}/${{base_name}}_output1.biom"
-cp "$input_file" "{validation_output_dir}/${{base_name}}_output2.biom"
+# Create two output files in the same directory as the input file
+cp "$input_file" "$input_dir/${{base_name}}_output1.biom"
+cp "$input_file" "$input_dir/${{base_name}}_output2.biom"
 
 echo "Processed $input_file -> created ${{base_name}}_output1.biom and ${{base_name}}_output2.biom"
 """)
@@ -70,7 +71,7 @@ echo "Processed $input_file -> created ${{base_name}}_output1.biom and ${{base_n
             "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
             test_input,
             f"{copy_script} {{input}}",
-            "--max-samples", "50",  # Should not split since only 1 sample
+            "--max-samples", "2",  # Force splitting if multi-sample data is used
             "--final-output-dir", test_output_dir,
             "--command-output-location", validation_output_dir,
             "--output-regex-patterns", ".*_output1\\.biom$", ".*_output2\\.biom$",

@@ -111,6 +111,7 @@ echo "Processed $input_file"
             input_file,
             f"{test_script} {{input}}",
             "--max-samples", "1",  # Force splitting
+            "--num-threads", "2",  # Test multithreading
             "--final-output-dir", temp_dir,
             "--command-output-location", temp_dir,
             "--output-regex-patterns", ".*_output1\\.biom$", ".*_output2\\.biom$",

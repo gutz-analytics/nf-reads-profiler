@@ -27,13 +27,14 @@ def run_docker_command(image, command, volume_mounts=None):
 def test_humann_split_stratified_table(test_data_dir):
     """Test humann_split_stratified_table with real HUMAnN Docker image."""
     
-    # Use project directory instead of /tmp for Docker compatibility
+    # Use the dedicated test output directory
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    temp_dir = os.path.join(project_root, "test_temp_split_real")
+    test_output_dir = os.path.join(project_root, "tests", "test_output")
+    temp_dir = os.path.join(test_output_dir, "test_temp_split_real")
     os.makedirs(temp_dir, exist_ok=True)
     
     try:
-        # Copy test file to temp directory
+        # Use original test data with max-samples=1 to force splitting
         input_file = os.path.join(test_data_dir, "demo_genefamilies.biom")
         temp_input = os.path.join(temp_dir, "demo_genefamilies.biom")
         subprocess.run(["cp", input_file, temp_input])
@@ -80,28 +81,15 @@ def test_humann_split_stratified_table(test_data_dir):
                 os.remove(os.path.join(output_dir, f))
             
             # Create wrapper script for Docker command
-            wrapper_script = os.path.join(temp_dir, "docker_wrapper.sh")
-            with open(wrapper_script, 'w') as f:
-                f.write(f"""#!/bin/bash
-input_file="$1"
-input_dir=$(dirname "$input_file")
-input_basename=$(basename "$input_file")
-
-# Mount the input directory (containing the temp files) and the output directory
-docker run --rm \\
-    -v "$input_dir":/input_data \\
-    -v "{temp_dir}/output":/output_data \\
-    gutzcontainers.azurecr.io/humann:4.0.0a1-1 \\
-    humann_split_stratified_table -i "/input_data/$input_basename" -o "/output_data"
-""")
-            os.chmod(wrapper_script, 0o755)
+            # Use the global wrapper from tests/wrappers
+            wrapper_script = os.path.join(project_root, "tests", "wrappers", "humann_split_stratified_wrapper.sh")
 
             # Run safe_cluster_process.py
             cmd = [
                 "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
                 temp_input,
                 f"{wrapper_script} {{input}}",
-                "--max-samples", "50",
+                "--max-samples", "2",  # Force splitting with 6 samples
                 "--final-output-dir", temp_dir,
                 "--command-output-location", f"{temp_dir}/output",
                 "--output-regex-patterns", ".*_stratified\\.biom$", ".*_unstratified\\.biom$",
@@ -151,11 +139,12 @@ def test_humann_regroup_table(test_data_dir):
     
     # Use project directory instead of /tmp for Docker compatibility
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    temp_dir = os.path.join(project_root, "test_temp_regroup_real")
+    test_output_dir = os.path.join(project_root, "tests", "test_output")
+    temp_dir = os.path.join(test_output_dir, "test_temp_regroup_real")
     os.makedirs(temp_dir, exist_ok=True)
     
     try:
-        # Copy test file to temp directory
+        # Use original test data with max-samples=1 to force splitting
         input_file = os.path.join(test_data_dir, "demo_genefamilies.biom")
         temp_input = os.path.join(temp_dir, "demo_genefamilies.biom")
         subprocess.run(["cp", input_file, temp_input])
@@ -188,27 +177,14 @@ def test_humann_regroup_table(test_data_dir):
             print("\nTesting with safe_cluster_process.py...")
             
             # Create wrapper script for Docker command
-            wrapper_script = os.path.join(temp_dir, "regroup_wrapper.sh")
-            with open(wrapper_script, 'w') as f:
-                f.write(f"""#!/bin/bash
-input_file="$1"
-input_dir=$(dirname "$input_file")
-input_basename=$(basename "$input_file")
-
-# Mount the input directory (containing the temp files) and the output directory
-docker run --rm \\
-    -v "$input_dir":/input_data \\
-    -v "{temp_dir}":/output_data \\
-    gutzcontainers.azurecr.io/humann:4.0.0a1-1 \\
-    humann_regroup_table -i "/input_data/$input_basename" -g uniref90_ko -o "/output_data/demo_clustered_ko.biom"
-""")
-            os.chmod(wrapper_script, 0o755)
+            # Use the global wrapper from tests/wrappers
+            wrapper_script = os.path.join(project_root, "tests", "wrappers", "humann_regroup_wrapper.sh")
 
             cmd = [
                 "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
                 temp_input,
                 f"{wrapper_script} {{input}}",
-                "--max-samples", "50",
+                "--max-samples", "2",  # Force splitting with 6 samples
                 "--final-output-dir", temp_dir,
                 "--command-output-location", temp_dir,
                 "--output-regex-patterns", ".*\\.biom$",

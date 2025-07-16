@@ -36,7 +36,10 @@ def test_humann_split_with_safe_cluster(test_data_dir):
     
     # First, test direct command
     print("\n1. Testing direct humann_split_stratified_table command...")
-    volume_mounts = [f"{test_data_dir}:/input_data", f"{current_dir}:/output_data"]
+    # Use absolute paths for Docker volume mounts
+    abs_test_data_dir = os.path.abspath(test_data_dir)
+    abs_current_dir = os.path.abspath(current_dir)
+    volume_mounts = [f"{abs_test_data_dir}:/input_data", f"{abs_current_dir}:/output_data"]
     result = run_docker_command(
         "gutzcontainers.azurecr.io/humann:4.0.0a1-1",
         ["humann_split_stratified_table", "-i", "/input_data/demo_genefamilies.biom", "-o", "/output_data/humann_test_output"],
@@ -66,31 +69,16 @@ def test_humann_split_with_safe_cluster(test_data_dir):
         # Now test with safe_cluster_process.py
         print("\n2. Testing with safe_cluster_process.py...")
         
-        # Create a wrapper script that handles Docker mounting properly
-        wrapper_script = os.path.join(current_dir, "docker_wrapper.sh")
-        with open(wrapper_script, 'w') as f:
-            f.write(f"""#!/bin/bash
-# Docker wrapper script for HUMAnN commands
-input_file="$1"
-input_dir=$(dirname "$input_file")
-input_basename=$(basename "$input_file")
-
-# Mount the input directory and run the command
-docker run --rm \\
-    -v "$input_dir":/input_data \\
-    -v "{current_dir}":/output_data \\
-    gutzcontainers.azurecr.io/humann:4.0.0a1-1 \\
-    humann_split_stratified_table -i "/input_data/$input_basename" -o "/output_data/humann_test_output"
-""")
-        os.chmod(wrapper_script, 0o755)
+        # Use the docker wrapper from tests/wrappers
+        wrapper_script = "/home/jonsan/nf-reads-profiler/tests/wrappers/humann_split_stratified_wrapper.sh"
         
         cmd = [
             "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
-            os.path.join(test_data_dir, "demo_genefamilies.biom"),
+            os.path.abspath(os.path.join(test_data_dir, "demo_genefamilies.biom")),
             f"{wrapper_script} {{input}}",
-            "--max-samples", "50",
-            "--final-output-dir", current_dir,
-            "--command-output-location", output_dir,
+            "--max-samples", "2",  # Force splitting if multi-sample data is used
+            "--final-output-dir", os.path.abspath(current_dir),
+            "--command-output-location", os.path.abspath(output_dir),
             "--output-regex-patterns", ".*_stratified\\.biom$", ".*_unstratified\\.biom$",
             "--output-group-names", "stratified", "unstratified",
             "--output-prefix", "demo_safe"
