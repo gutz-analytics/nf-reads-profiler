@@ -181,6 +181,15 @@ python bin/safe_cluster_process.py input.biom "command {input}" --max-samples 10
 - **Parallel (3 threads)**: ~1.4 seconds for 150 samples
 - **Speedup**: ~43% faster with 3 threads
 
+### Nextflow Integration
+
+The multithreading functionality is now integrated into the Nextflow workflow:
+
+- **process_humann_tables**: Uses 64 threads (Azure Batch) or 1 thread (test profile)
+- **split_stratified_tables**: Uses 64 threads (Azure Batch) or 1 thread (test profile)
+- **Configurable split size**: `params.split_size` parameter controls memory management
+- **Automatic thread inheritance**: Uses `${task.cpus}` to match allocated resources
+
 ### Technical Implementation
 
 - **ThreadPoolExecutor**: Uses Python's concurrent.futures for parallel processing

@@ -116,16 +116,12 @@ def test_humann_split_stratified_equivalence(test_data_dir, test_output_dir):
         # 1. Run direct humann_split_stratified_table
         print("\\n1. Running direct humann_split_stratified_table...")
         
-        # Build Docker command with proper volume mounting
-        docker_cmd = [
-            "docker", "run", "--rm",
-            "-v", f"{test_dir}:/data",
-            "gutzcontainers.azurecr.io/humann:4.0.0a1-1",
-            "humann_split_stratified_table", "-i", "/data/demo_genefamilies.biom", "-o", "/data/direct_output"
+        direct_cmd = [
+            "humann_split_stratified_table", "-i", temp_input, "-o", direct_output
         ]
         
-        print(f"Running: {' '.join(docker_cmd)}")
-        direct_result = subprocess.run(docker_cmd, capture_output=True, text=True)
+        print(f"Running: {' '.join(direct_cmd)}")
+        direct_result = subprocess.run(direct_cmd, capture_output=True, text=True)
         
         print(f"Direct command return code: {direct_result.returncode}")
         if direct_result.stdout:
@@ -147,16 +143,13 @@ def test_humann_split_stratified_equivalence(test_data_dir, test_output_dir):
         # 2. Run with safe_cluster_process.py
         print("\\n2. Running safe_cluster_process.py...")
         
-        # Use the global wrapper script from tests/wrappers
-        wrapper_script = os.path.join(project_root, "tests", "wrappers", "humann_split_stratified_wrapper.sh")
-        
         cluster_cmd = [
             "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
             temp_input,
-            f"{wrapper_script} {{input}}",
+            "humann_split_stratified_table -i {input} -o .",
             "--max-samples", "2",  # Force splitting if multi-sample data is used
             "--final-output-dir", test_dir,
-            "--command-output-location", cluster_output,
+            "--command-output-location", ".",
             "--output-regex-patterns", ".*_stratified\\.biom$", ".*_unstratified\\.biom$",
             "--output-group-names", "stratified", "unstratified",
             "--output-prefix", "demo_cluster"
@@ -251,16 +244,12 @@ def test_humann_regroup_equivalence(test_data_dir, test_output_dir):
         print(f"\\n1. Running direct humann_regroup_table with {group_type}...")
         direct_output = os.path.join(test_dir, "direct_ko.biom")
         
-        # Build Docker command with proper volume mounting
-        docker_cmd = [
-            "docker", "run", "--rm",
-            "-v", f"{test_dir}:/data",
-            "gutzcontainers.azurecr.io/humann:4.0.0a1-1",
-            "humann_regroup_table", "-i", "/data/demo_genefamilies.biom", "-g", group_type, "-o", "/data/direct_ko.biom"
+        direct_cmd = [
+            "humann_regroup_table", "-i", temp_input, "-g", group_type, "-o", direct_output
         ]
         
-        print(f"Running: {' '.join(docker_cmd)}")
-        direct_result = subprocess.run(docker_cmd, capture_output=True, text=True)
+        print(f"Running: {' '.join(direct_cmd)}")
+        direct_result = subprocess.run(direct_cmd, capture_output=True, text=True)
         
         print(f"Direct command return code: {direct_result.returncode}")
         if direct_result.stdout:
@@ -275,18 +264,14 @@ def test_humann_regroup_equivalence(test_data_dir, test_output_dir):
         # 2. Run with safe_cluster_process.py
         print("\\n2. Running safe_cluster_process.py...")
         
-        # Create wrapper script for Docker command
-        # Use the global wrapper script from tests/wrappers
-        wrapper_script = os.path.join(project_root, "tests", "wrappers", "humann_regroup_wrapper.sh")
-        
         cluster_cmd = [
             "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
             temp_input,
-            f"{wrapper_script} {{input}}",
+            "humann_regroup_table -i {input} -g uniref90_ko -o {input}_ko.biom",
             "--max-samples", "2",  # Force splitting if multi-sample data is used
             "--final-output-dir", test_dir,
-            "--command-output-location", test_dir,
-            "--output-regex-patterns", ".*_ko\\.biom$",
+            "--command-output-location", ".",
+            "--output-regex-patterns", ".*_ko.*\\.biom$",
             "--output-group-names", "ko",
             "--output-prefix", "demo_cluster"
         ]

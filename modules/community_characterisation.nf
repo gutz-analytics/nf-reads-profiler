@@ -273,6 +273,7 @@ process process_humann_tables {
       ${run}_genefamilies.biom \\
       "humann_regroup_table -i {input} -g \$group -o output_\${group}.biom" \\
       --max-samples ${params.split_size ?: 100} \\
+      --num-threads ${task.cpus} \\
       --final-output-dir . \\
       --command-output-location . \\
       --output-regex-patterns ".*\\.biom\$" \\
@@ -351,6 +352,7 @@ process split_stratified_tables {
     ${biom_table} \\
     "humann_split_stratified_table -i {input} -o ." \\
     --max-samples ${params.split_size ?: 100} \\
+    --num-threads ${task.cpus} \\
     --final-output-dir . \\
     --command-output-location . \\
     --output-regex-patterns ".*_stratified\\.biom\$" ".*_unstratified\\.biom\$" \\

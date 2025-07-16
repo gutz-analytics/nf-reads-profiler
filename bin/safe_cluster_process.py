@@ -292,6 +292,7 @@ def main():
     parser.add_argument('--output-prefix', help='Prefix for final output files (default: input filename without extension)')
     parser.add_argument('--no-join', action='store_true', help='Do not join results, just process splits and copy outputs')
     parser.add_argument('--num-threads', type=int, default=1, help='Number of threads to use for parallel processing (default: 1)')
+    parser.add_argument('--temp-dir', help='Directory for temporary files (default: current directory)')
     
     args = parser.parse_args()
 
@@ -304,6 +305,7 @@ def main():
     group_names = args.output_group_names
     output_prefix = args.output_prefix or basename(biom_fp).replace('.biom', '')
     num_threads = args.num_threads
+    temp_dir = args.temp_dir
     
     # Validate group names
     if group_names and len(group_names) != len(regex_patterns):
@@ -317,20 +319,18 @@ def main():
     # Create output directory if it doesn't exist
     os.makedirs(final_output_dir, exist_ok=True)
 
-    # Use a dedicated directory for splits instead of TemporaryDirectory
-    # This avoids Docker mounting issues with temporary directories
+    # Create temp directory for splits
+    if temp_dir:
+        # Use user-specified temp directory
+        base_temp_dir = temp_dir
+    else:
+        # Use current directory by default
+        base_temp_dir = os.getcwd()
+    
     import time
     import random
     temp_dir_name = f"safe_cluster_temp_{int(time.time())}_{random.randint(1000, 9999)}"
-    
-    # If we're in a test environment, use the test output directory
-    if 'test' in os.getcwd().lower() or any('test' in arg for arg in sys.argv):
-        base_temp_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tests', 'test_output')
-        os.makedirs(base_temp_dir, exist_ok=True)
-        td = os.path.join(base_temp_dir, temp_dir_name)
-    else:
-        # For production, use system temp directory
-        td = os.path.join('/tmp', temp_dir_name)
+    td = os.path.join(base_temp_dir, temp_dir_name)
     
     os.makedirs(td, exist_ok=True)
     

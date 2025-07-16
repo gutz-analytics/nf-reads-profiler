@@ -8,22 +8,6 @@ import shutil
 import numpy as np
 from biom import load_table
 
-def run_docker_command(image, command, volume_mounts=None):
-    """Run a command in a Docker container."""
-    if volume_mounts is None:
-        volume_mounts = []
-    
-    docker_cmd = ["docker", "run", "--rm"]
-    
-    # Add volume mounts
-    for mount in volume_mounts:
-        docker_cmd.extend(["-v", mount])
-    
-    docker_cmd.append(image)
-    docker_cmd.extend(command)
-    
-    return subprocess.run(docker_cmd, capture_output=True, text=True)
-
 def test_humann_split_stratified_table(test_data_dir):
     """Test humann_split_stratified_table with real HUMAnN Docker image."""
     
@@ -52,12 +36,9 @@ def test_humann_split_stratified_table(test_data_dir):
         print(f"Output dir: {output_dir}")
         
         # Test direct command first
-        volume_mounts = [f"{temp_dir}:/data"]
-        result = run_docker_command(
-            "gutzcontainers.azurecr.io/humann:4.0.0a1-1",
-            ["humann_split_stratified_table", "-i", "/data/demo_genefamilies.biom", "-o", "/data/output"],
-            volume_mounts
-        )
+        cmd = ["humann_split_stratified_table", "-i", temp_input, "-o", output_dir]
+        print(f"Running: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
         
         print(f"Direct command return code: {result.returncode}")
         print(f"STDOUT:\n{result.stdout}")
@@ -80,18 +61,14 @@ def test_humann_split_stratified_table(test_data_dir):
             for f in created_files:
                 os.remove(os.path.join(output_dir, f))
             
-            # Create wrapper script for Docker command
-            # Use the global wrapper from tests/wrappers
-            wrapper_script = os.path.join(project_root, "tests", "wrappers", "humann_split_stratified_wrapper.sh")
-
             # Run safe_cluster_process.py
             cmd = [
                 "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
                 temp_input,
-                f"{wrapper_script} {{input}}",
+                "humann_split_stratified_table -i {input} -o .",
                 "--max-samples", "2",  # Force splitting with 6 samples
                 "--final-output-dir", temp_dir,
-                "--command-output-location", f"{temp_dir}/output",
+                "--command-output-location", ".",
                 "--output-regex-patterns", ".*_stratified\\.biom$", ".*_unstratified\\.biom$",
                 "--output-group-names", "stratified", "unstratified",
                 "--output-prefix", "demo_clustered"
@@ -152,20 +129,15 @@ def test_humann_regroup_table(test_data_dir):
         print("\nTesting real humann_regroup_table command...")
         
         # Test direct command first
-        volume_mounts = [f"{temp_dir}:/data"]
-        result = run_docker_command(
-            "gutzcontainers.azurecr.io/humann:4.0.0a1-1",
-            ["humann_regroup_table", "-i", "/data/demo_genefamilies.biom", "-g", "uniref90_ko", "-o", "/data/demo_ko.biom"],
-            volume_mounts
-        )
+        output_file = os.path.join(temp_dir, "demo_ko.biom")
+        cmd = ["humann_regroup_table", "-i", temp_input, "-g", "uniref90_ko", "-o", output_file]
+        print(f"Running: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
         
         print(f"Direct command return code: {result.returncode}")
         print(f"STDOUT:\n{result.stdout}")
         if result.stderr:
             print(f"STDERR:\n{result.stderr}")
-        
-        # Check if output file was created
-        output_file = os.path.join(temp_dir, "demo_ko.biom")
         
         if result.returncode == 0 and os.path.exists(output_file):
             print("✓ Direct humann_regroup_table works")
@@ -176,18 +148,14 @@ def test_humann_regroup_table(test_data_dir):
             # Now test with safe_cluster_process.py
             print("\nTesting with safe_cluster_process.py...")
             
-            # Create wrapper script for Docker command
-            # Use the global wrapper from tests/wrappers
-            wrapper_script = os.path.join(project_root, "tests", "wrappers", "humann_regroup_wrapper.sh")
-
             cmd = [
                 "/home/jonsan/nf-reads-profiler/bin/safe_cluster_process.py",
                 temp_input,
-                f"{wrapper_script} {{input}}",
+                "humann_regroup_table -i {input} -g uniref90_ko -o {input}_ko.biom",
                 "--max-samples", "2",  # Force splitting with 6 samples
                 "--final-output-dir", temp_dir,
-                "--command-output-location", temp_dir,
-                "--output-regex-patterns", ".*\\.biom$",
+                "--command-output-location", ".",
+                "--output-regex-patterns", ".*_ko.*\\.biom$",
                 "--output-group-names", "ko",
                 "--output-prefix", "demo_clustered"
             ]
@@ -213,14 +181,12 @@ def test_humann_regroup_table(test_data_dir):
                     
                     # Compare with direct output
                     # Run direct command again for comparison
-                    direct_result = run_docker_command(
-                        "gutzcontainers.azurecr.io/humann:4.0.0a1-1",
-                        ["humann_regroup_table", "-i", "/data/demo_genefamilies.biom", "-g", "uniref90_ko", "-o", "/data/demo_ko_direct.biom"],
-                        volume_mounts
-                    )
+                    direct_output_file = os.path.join(temp_dir, "demo_ko_direct.biom")
+                    direct_cmd = ["humann_regroup_table", "-i", temp_input, "-g", "uniref90_ko", "-o", direct_output_file]
+                    direct_result = subprocess.run(direct_cmd, capture_output=True, text=True)
                     
                     if direct_result.returncode == 0:
-                        direct_table = load_table(os.path.join(temp_dir, "demo_ko_direct.biom"))
+                        direct_table = load_table(direct_output_file)
                         
                         if (table.shape == direct_table.shape and 
                             set(table.ids(axis='sample')) == set(direct_table.ids(axis='sample')) and
