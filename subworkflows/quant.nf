@@ -94,6 +94,7 @@ process kraken {
     tag "$run"
     label 'highmem'
     scratch false
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2"
 
     input:
@@ -139,6 +140,7 @@ process kraken {
 process architeuthis_filter {
     tag "$name"
     label 'low'
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
 
     input:
@@ -163,6 +165,7 @@ process architeuthis_filter {
 process kraken_report {
     tag "$name"
     label 'low'
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
 
     input:
@@ -183,6 +186,7 @@ process kraken_report {
 process summarize_mappings {
     tag "$name"
     label 'low'
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi/architeuthis"
 
     input:
@@ -203,6 +207,7 @@ process summarize_mappings {
 process merge_mappings {
     tag "merge"
     label 'low'
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
 
     input:
@@ -221,6 +226,7 @@ process merge_mappings {
 process count_taxa {
     tag "${name}_${lev}"
     label 'low'
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi/bracken", overwrite: true
 
     input:
@@ -245,6 +251,7 @@ process count_taxa {
 process quantify {
     tag "quantify"
     label 'low'
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
 
     input:
@@ -265,6 +272,7 @@ process quantify {
 process merge_taxonomy {
     tag "${run}_${lev}"
     label 'low'
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi/merged", mode: "copy", overwrite: true
 
     input:
@@ -283,6 +291,7 @@ process merge_taxonomy {
 process add_lineage {
     tag "${run}_${lev}"
     label 'low'
+    container params.docker_container_medi
     publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
 
     input:
@@ -303,6 +312,7 @@ process add_lineage {
 process multiqc {
     tag "multiqc"
     label 'low'
+    container params.docker_container_multiqc
     publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
 
     input:
@@ -313,7 +323,7 @@ process multiqc {
 
     script:
     run = task.ext.run ?: "${meta.run}"
-    """
+w    """
     multiqc ${params.outdir}/${params.project}/*/medi/kraken2
     """
 }

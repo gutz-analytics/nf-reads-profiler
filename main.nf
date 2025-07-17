@@ -5,6 +5,7 @@ nextflow.enable.dsl=2
 include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables; combine_humann_taxonomy_tables; process_humann_tables; convert_tables_to_biom; split_stratified_tables } from './modules/community_characterisation'
 include { MULTIQC; get_software_versions; clean_reads; count_reads} from './modules/house_keeping'
 include { AWS_DOWNLOAD; FASTERQ_DUMP  } from './modules/data_handling'
+include { MEDI_QUANT } from './subworkflows/quant'
 include { samplesheetToList } from 'plugin/nf-schema'
 
 def versionMessage()
@@ -335,6 +336,22 @@ workflow {
             .groupTuple()
             
   combine_metaphlan_tables(ch_metaphlan)
+
+  // MEDI quantification workflow
+  if (params.enable_medi) {
+    // Check that required MEDI parameters are set
+    if (!params.medi_db_path || !params.medi_foods_file || !params.medi_food_contents_file) {
+      error "MEDI quantification requires: medi_db_path, medi_foods_file, and medi_food_contents_file parameters"
+    }
+    
+    // Run MEDI quantification on cleaned reads
+    MEDI_QUANT(
+      clean_reads.out.reads_cleaned,
+      file(params.medi_db_path),
+      file(params.medi_foods_file),
+      file(params.medi_food_contents_file)
+    )
+  }
 
   // Split stratified tables for biom files
   if (!params.skipHumann && params.annotation) {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Nextflow pipeline for metagenomic read profiling using MetaPhlAn4 and HUMAnN3. The pipeline is based on the original YAMP repository but has been modified for Azure Batch execution with containerized bioinformatics tools.
+This is a Nextflow pipeline for metagenomic read profiling using MetaPhlAn4 and HUMAnN3, with optional MEDI (food microbiome) quantification. The pipeline is based on the original YAMP repository but has been modified for Azure Batch execution with containerized bioinformatics tools.
 
 ## Common Commands
 
@@ -18,6 +18,11 @@ nextflow run main.nf -profile test
 **Azure Batch execution:**
 ```bash
 nextflow run main.nf -profile azure --input samplesheet.csv --project <project_name> --outdir <output_path>
+```
+
+**Azure Batch with MEDI quantification:**
+```bash
+nextflow run main.nf -profile azure --input samplesheet.csv --project <project_name> --outdir <output_path> --enable_medi
 ```
 
 **AWS Batch execution (legacy):**
@@ -61,7 +66,7 @@ nextflow run main.nf --input <samplesheet.csv> --help
 
 ### Core Workflow Structure
 
-The pipeline is organized into three main process groups:
+The pipeline is organized into four main process groups:
 
 1. **Data Handling (`modules/data_handling.nf`)**
    - `AWS_DOWNLOAD`: Downloads SRA files from S3
@@ -73,7 +78,15 @@ The pipeline is organized into three main process groups:
    - `combine_humann_tables`: Combines HUMAnN3 output tables
    - `combine_metaphlan_tables`: Combines MetaPhlAn4 output tables
 
-3. **House Keeping (`modules/house_keeping.nf`)**
+3. **MEDI Quantification (`subworkflows/quant.nf`)**
+   - `MEDI_QUANT`: Food microbiome quantification subworkflow
+   - `kraken`: Kraken2 taxonomic classification
+   - `architeuthis_filter`: Architeuthis mapping filter
+   - `kraken_report`: Kraken2 report generation
+   - `count_taxa`: Bracken abundance estimation
+   - `quantify`: Food abundance quantification
+
+4. **House Keeping (`modules/house_keeping.nf`)**
    - `clean_reads`: Quality control and trimming with fastp
    - `count_reads`: Read counting and filtering
    - `get_software_versions`: Software version tracking
@@ -100,6 +113,7 @@ All processes use containerized tools from Azure Container Registry:
 - HUMAnN3: `gutzcontainers.azurecr.io/humann:3.9`
 - fastp: `gutzcontainers.azurecr.io/fastp:0.23.4`
 - MultiQC: `gutzcontainers.azurecr.io/multiqc:1.11`
+- MEDI: `params.docker_container_medi` (specified in configuration)
 
 ### Database Requirements
 
@@ -112,13 +126,30 @@ All processes use containerized tools from Azure Container Registry:
 - UniRef90: `/dbs/metagenometest/metagenome-dbs/humann/3.0/uniref/`
 - Utility mapping: `/dbs/metagenometest/metagenome-dbs/humann/3.0/utility_mapping/`
 
+**MEDI databases:**
+- Kraken2/Bracken database: `params.medi_db_path`
+- Foods definition file: `params.medi_foods_file`
+- Food contents mapping: `params.medi_food_contents_file`
+
 ### Key Parameters
 
+**Core Pipeline:**
 - `skipHumann`: Skip functional profiling (default: false)
 - `singleEnd`: Single-end reads mode (default: false)
 - `nreads`: Limit number of reads processed (default: 33333333)
 - `minreads`: Minimum reads required per sample (default: 100000)
 - `annotation`: Enable functional annotation (default: true)
+
+**MEDI Quantification:**
+- `enable_medi`: Enable MEDI workflow (default: false)
+- `confidence`: Kraken2 confidence threshold (default: 0.3)
+- `consistency`: Architeuthis filter consistency threshold (default: 0.95)
+- `entropy`: Architeuthis filter entropy threshold (default: 0.1)
+- `multiplicity`: Architeuthis filter multiplicity threshold (default: 4)
+- `read_length`: Read length for Bracken (default: 150)
+- `threshold`: Bracken abundance threshold (default: 10)
+- `batchsize`: Batch size for Kraken2 processing (default: 400)
+- `mapping`: Enable mapping summary generation (default: false)
 
 ### Output Structure
 
@@ -128,6 +159,17 @@ outdir/
 │   ├── study/
 │   │   ├── taxa/           # MetaPhlAn4 taxonomic profiles
 │   │   ├── function/       # HUMAnN3 functional profiles
+│   │   ├── medi/           # MEDI quantification results (if enabled)
+│   │   │   ├── kraken2/    # Kraken2 taxonomic classification
+│   │   │   ├── bracken/    # Bracken abundance estimation
+│   │   │   ├── merged/     # Merged taxonomy tables
+│   │   │   ├── architeuthis/ # Mapping summaries (if enabled)
+│   │   │   ├── food_abundance.csv
+│   │   │   ├── food_content.csv
+│   │   │   ├── D_counts.csv
+│   │   │   ├── G_counts.csv
+│   │   │   ├── S_counts.csv
+│   │   │   └── multiqc_report.html
 │   │   └── log/           # MultiQC reports
 │   └── execution_reports/ # Nextflow execution reports
 ```
@@ -276,3 +318,50 @@ The test suite includes 6 comprehensive tests:
 - ✅ Multithreading provides correct results with performance improvements
 - ✅ Perfect data integrity maintained across all test scenarios
 - ✅ Docker integration works seamlessly with proper volume mounting
+
+## MEDI Workflow Integration
+
+### Overview
+
+The MEDI (Metagenomic Estimation of Dietary Intake) workflow has been integrated as a subworkflow (`subworkflows/quant.nf`) for food microbiome quantification. This workflow processes cleaned reads through Kraken2 taxonomic classification, Architeuthis filtering, Bracken abundance estimation, and final food quantification.
+
+### Integration Status
+
+🚧 **IN DEVELOPMENT** - The MEDI workflow has been successfully integrated into the pipeline structure but requires testing before production use.
+
+### Completed Integration Tasks
+
+- ✅ Subworkflow structure implemented (`subworkflows/quant.nf`)
+- ✅ Main workflow integration with conditional execution
+- ✅ Parameter configuration added to `nextflow.config`
+- ✅ Profile-based configuration (test/azure)
+- ✅ Workflow syntax validation
+- ✅ Preview mode execution
+
+### Pending Tasks
+
+- 🔄 **Full workflow testing** - End-to-end testing with real data
+- 🔄 **Container validation** - Verify MEDI container accessibility
+- 🔄 **Database validation** - Confirm database paths and formats
+- 🔄 **Resource optimization** - Tune memory and CPU requirements
+- 🔄 **Error handling** - Test failure scenarios and recovery
+
+### Usage (Testing Phase)
+
+**Enable MEDI workflow:**
+```bash
+nextflow run main.nf --enable_medi --medi_db_path /path/to/db --medi_foods_file foods.csv --medi_food_contents_file contents.csv
+```
+
+**Required Parameters:**
+- `medi_db_path`: Path to Kraken2/Bracken database
+- `medi_foods_file`: Foods definition file
+- `medi_food_contents_file`: Food contents mapping file
+
+### Expected Output Files
+
+- `food_abundance.csv`: Food abundance matrix
+- `food_content.csv`: Food content matrix
+- `D_counts.csv`, `G_counts.csv`, `S_counts.csv`: Taxonomy counts by level
+- `multiqc_report.html`: Quality control report
+- `mappings.csv`: Mapping summaries (if enabled)
