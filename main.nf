@@ -344,12 +344,28 @@ workflow {
       error "MEDI quantification requires: medi_db_path, medi_foods_file, and medi_food_contents_file parameters"
     }
     
-    // Run MEDI quantification on cleaned reads
+    // Group raw reads (from FASTERQ_DUMP/local) by study for MEDI processing
+    // The MEDI subworkflow will handle fastp preprocessing internally
+    read_check.pass
+      .map{meta, reads, count -> 
+        // Create grouping metadata with study information
+        def group_meta = meta.subMap('run')  // Extract study grouping key
+        [group_meta, meta, reads]  // Use raw reads, not cleaned
+      }
+      .groupTuple(by: [0])  // Group by study
+      .map{group_meta, metas, reads_files ->
+        // Flatten back to individual sample format but maintain study grouping info
+        def study = group_meta.run
+        def samples = [metas, reads_files].transpose().collect{meta, reads -> [meta, reads]}
+        [study, samples]
+      }
+      .set{studies_with_samples}
+    
+    // Pass all studies to MEDI subworkflow - it will process each study group
     MEDI_QUANT(
-      clean_reads.out.reads_cleaned,
-      file(params.medi_db_path),
-      file(params.medi_foods_file),
-      file(params.medi_food_contents_file)
+      studies_with_samples,
+      params.medi_foods_file,
+      params.medi_food_contents_file
     )
   }
 

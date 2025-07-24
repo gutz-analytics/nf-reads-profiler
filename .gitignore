@@ -4,3 +4,5 @@ work/
 test/
 .DS_Store
 .nf-test*
+ramdisk_test/keys.sh
+ramdisk_test/
