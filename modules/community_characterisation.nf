@@ -232,61 +232,6 @@ process combine_humann_taxonomy_tables {
   """
 }
 
-process process_humann_tables {
-  tag "$run"
-
-  container params.docker_container_humann4
-
-  publishDir {"${params.outdir}/${params.project}/${run}/function/processed" }, mode: 'copy', pattern: "*.biom"
-  publishDir {"${params.outdir}/${params.project}/combined_bioms/genefamilies" }, mode: 'copy', pattern: "*_genefamilies.biom"
-  publishDir {"${params.outdir}/${params.project}/combined_bioms/regrouped" }, mode: 'copy', pattern: "*_genefamilies.*.biom"
-  
-  input:
-  tuple val(meta), path(table)
-
-  output:
-  tuple val(meta), path("*_genefamilies.biom"), emit: genefamilies_biom
-  tuple val(meta), path("*_genefamilies.*.biom"), emit: regrouped_bioms
-
-  when:
-  params.annotation && params.process_humann_tables
-
-  script:
-  run = task.ext.run ?: "${meta.run}"
-  regroups = params.humann_regroups ?: "uniref90_ko,uniref90_rxn"
-  """
-  # Convert to biom format
-  echo "Converting HUMAnN table to biom"
-  biom convert \\
-    --input-fp ${table} \\
-    --output-fp ${run}_genefamilies.biom \\
-    --table-type 'Function table' \\
-    --to-hdf5
-
-  # Process each regroup type using safe_cluster_process.py
-  IFS=',' read -r -a groups <<< "${regroups}"
-  for group in "\${groups[@]}"; do
-    echo "Regrouping to \$group using safe_cluster_process.py"
-    
-    # Use safe_cluster_process.py instead of safe_regroup.py
-    safe_cluster_process.py \\
-      ${run}_genefamilies.biom \\
-      "humann_regroup_table -i {input} -g \$group -o output_\${group}.biom" \\
-      --max-samples ${params.split_size ?: 100} \\
-      --num-threads ${task.cpus} \\
-      --final-output-dir . \\
-      --command-output-location . \\
-      --output-regex-patterns ".*\\.biom\$" \\
-      --output-group-names "\${group}" \\
-      --output-prefix ${run}_genefamilies
-      
-    # The output will be named ${run}_genefamilies_\${group}.biom, so rename it to expected format
-    mv ${run}_genefamilies_\${group}.biom ${run}_genefamilies.\${group}.biom
-  done
-
-  echo "Processing complete"
-  """
-}
 
 process convert_tables_to_biom {
   tag "${run}_${type}"
@@ -294,8 +239,9 @@ process convert_tables_to_biom {
   container params.docker_container_humann4
 
   publishDir {"${params.outdir}/${params.project}/${run}/combined_tables" }, mode: 'copy', pattern: "*.biom"
-  publishDir {"${params.outdir}/${params.project}/combined_bioms/pathabundance" }, mode: 'copy', pattern: "*_pathabundance.biom"
-  publishDir {"${params.outdir}/${params.project}/combined_bioms/reactions" }, mode: 'copy', pattern: "*_reactions.biom"
+  publishDir {"${params.outdir}/${params.project}/combined_bioms/genefamilies" }, mode: 'copy', pattern: "*_genefamilies*.biom"
+  publishDir {"${params.outdir}/${params.project}/combined_bioms/pathabundance" }, mode: 'copy', pattern: "*_pathabundance*.biom"
+  publishDir {"${params.outdir}/${params.project}/combined_bioms/reactions" }, mode: 'copy', pattern: "*_reactions*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/humann_taxonomy" }, mode: 'copy', pattern: "*_humann_taxonomy.biom"
   
   input:
@@ -310,12 +256,14 @@ process convert_tables_to_biom {
   script:
   run = task.ext.run ?: "${meta.run}"
   type = task.ext.type ?: "${meta.type}"
+  stratification = task.ext.stratification ?: "${meta.stratification}"
   table_type = (type == 'humann_taxonomy') ? 'Taxon table' : 'Function table'
+  output_name = (stratification && stratification != 'combined' && stratification != 'null') ? "${run}_${type}_${stratification}.biom" : "${run}_${type}.biom"
   """
-  echo "Converting ${type} table to biom format"
+  echo "Converting ${type} table to biom format (${stratification})"
   biom convert \\
     --input-fp ${table} \\
-    --output-fp ${run}_${type}.biom \\
+    --output-fp ${output_name} \\
     --table-type '${table_type}' \\
     --to-hdf5
   """
@@ -326,17 +274,12 @@ process split_stratified_tables {
 
   container params.docker_container_humann4
 
-  publishDir {"${params.outdir}/${params.project}/${run}/combined_unstratified" }, mode: 'copy', pattern: "*.biom"
-  publishDir {"${params.outdir}/${params.project}/combined_bioms/genefamilies/unstratified" }, mode: 'copy', pattern: "*genefamilies_*.biom"
-  publishDir {"${params.outdir}/${params.project}/combined_bioms/pathabundance/unstratified" }, mode: 'copy', pattern: "*pathabundance_*.biom"
-  publishDir {"${params.outdir}/${params.project}/combined_bioms/reactions/unstratified" }, mode: 'copy', pattern: "*reactions_*.biom"
-  publishDir {"${params.outdir}/${params.project}/combined_bioms/regrouped/unstratified" }, mode: 'copy', pattern: "*uniref90_*.biom"
-
   input:
-  tuple val(meta), path(biom_table)
+  tuple val(meta), path(tsv_table)
 
   output:
-  tuple val(meta), path("*.biom"), emit: unstratified_tables
+  tuple val(meta), path("*_stratified.tsv"), emit: stratified_tables
+  tuple val(meta), path("*_unstratified.tsv"), emit: unstratified_tables
 
   when:
   params.annotation
@@ -345,23 +288,66 @@ process split_stratified_tables {
   run = task.ext.run ?: "${meta.run}"
   type = task.ext.type ?: "${meta.type}"
   """
-  echo "Splitting stratified table: ${biom_table} (type: ${type})"
+  echo "Splitting stratified table: ${tsv_table} (type: ${type})"
   
-  # Use safe_cluster_process.py to handle memory issues with large tables
-  safe_cluster_process.py \\
-    ${biom_table} \\
-    "humann_split_stratified_table -i {input} -o ." \\
-    --max-samples ${params.split_size ?: 100} \\
-    --num-threads ${task.cpus} \\
-    --final-output-dir . \\
-    --command-output-location . \\
-    --output-regex-patterns ".*_stratified\\.biom\$" ".*_unstratified\\.biom\$" \\
-    --output-group-names "stratified" "unstratified" \\
-    --output-prefix ${run}_${type}
+  # Split the table into stratified and unstratified versions
+  humann_split_stratified_table \\
+    -i ${tsv_table} \\
+    -o .
     
   # List what was created
   echo "Split files created:"
-  ls -la *.biom
+  ls -la *.tsv
+  """
+}
+
+process regroup_genefamilies {
+  tag "${run}_${type}"
+
+  container params.docker_container_humann4
+
+  publishDir {"${params.outdir}/${params.project}/${run}/function/regrouped" }, mode: 'copy', pattern: "*.biom"
+  publishDir {"${params.outdir}/${params.project}/combined_bioms/regrouped" }, mode: 'copy', pattern: "*.biom"
+
+  input:
+  tuple val(meta), path(genefamilies_biom)
+
+  output:
+  tuple val(meta), path("*.biom"), emit: regrouped_bioms
+
+  when:
+  params.annotation && params.process_humann_tables && meta.type == 'genefamilies'
+
+  script:
+  run = task.ext.run ?: "${meta.run}"
+  type = task.ext.type ?: "${meta.type}"
+  stratification = task.ext.stratification ?: "${meta.stratification}"
+  regroups = params.humann_regroups ?: "uniref90_ko,uniref90_rxn"
+  """
+  echo "Regrouping genefamilies table: ${genefamilies_biom} (${stratification})"
+  
+  # Process each regroup type using safe_cluster_process.py
+  IFS=',' read -r -a groups <<< "${regroups}"
+  for group in "\${groups[@]}"; do
+    echo "Regrouping to \$group using safe_cluster_process.py"
+    
+    # Use safe_cluster_process.py for regrouping
+    safe_cluster_process.py \\
+      ${genefamilies_biom} \\
+      "humann_regroup_table -i {input} -g \$group -o output_\${group}.biom" \\
+      --max-samples ${params.split_size ?: 100} \\
+      --num-threads ${task.cpus} \\
+      --final-output-dir . \\
+      --command-output-location . \\
+      --output-regex-patterns ".*\\.biom\$" \\
+      --output-group-names "\${group}" \\
+      --output-prefix ${run}_${type}_${stratification}
+      
+    # The output will be named ${run}_${type}_${stratification}_\${group}.biom
+    mv ${run}_${type}_${stratification}_\${group}.biom ${run}_${type}_${stratification}.\${group}.biom
+  done
+
+  echo "Regrouping complete"
   """
 }
 

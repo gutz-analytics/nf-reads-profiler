@@ -2,7 +2,7 @@
 
 nextflow.enable.dsl=2
 
-include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables; combine_humann_taxonomy_tables; process_humann_tables; convert_tables_to_biom; split_stratified_tables } from './modules/community_characterisation'
+include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables; combine_humann_taxonomy_tables; convert_tables_to_biom; split_stratified_tables; regroup_genefamilies } from './modules/community_characterisation'
 include { MULTIQC; get_software_versions; clean_reads; count_reads} from './modules/house_keeping'
 include { AWS_DOWNLOAD; FASTERQ_DUMP  } from './modules/data_handling'
 include { MEDI_QUANT } from './subworkflows/quant'
@@ -300,10 +300,8 @@ workflow {
     // Also combine HUMAnN-generated taxonomy profiles
     combine_humann_taxonomy_tables(ch_humann_taxonomy)
     
-    // Convert pathabundance and reactions tables to biom format
-    ch_tables_for_biom = combine_humann_tables.out.filter { meta, table -> 
-      meta.type == 'pathabundance' || meta.type == 'reactions'
-    }
+    // Get output tsv tables for conversion to biom
+    ch_tables_for_splitting = combine_humann_tables.out
     
     // Add combined HUMAnN taxonomy tables to biom conversion
     ch_humann_taxonomy_for_biom = combine_humann_taxonomy_tables.out.combined_tsv
@@ -313,16 +311,6 @@ workflow {
                     [ meta_new, table ]
                 }
     
-    convert_tables_to_biom(ch_tables_for_biom.mix(ch_humann_taxonomy_for_biom))
-    
-    // Process HUMAnN tables if enabled
-    if (params.process_humann_tables) {
-      // Use only the genefamilies combined tables for processing
-      ch_combined_genefamilies = combine_humann_tables.out.filter { meta, table -> 
-        meta.type == 'genefamilies' 
-      }
-      process_humann_tables(ch_combined_genefamilies)
-    }
   }
 
 
@@ -371,35 +359,33 @@ workflow {
 
   // Split stratified tables for biom files
   if (!params.skipHumann && params.annotation) {
-    // Start with biom files from convert_tables_to_biom (pathabundance and reactions)
-    ch_bioms_for_splitting = convert_tables_to_biom.out.biom_files
+
     
-    // Add regrouped biom tables if processing is enabled
+
+    // Split output tsv into stratified and unstratified 
+
+    // Split raw output tables into stratified and unstratified
+    split_stratified_tables(ch_tables_for_splitting)
+    
+    // Make channel for biom conversion - combine both stratified and unstratified outputs
+    ch_tables_for_biom = split_stratified_tables.out.stratified_tables
+      .map { meta, file -> [meta + [stratification: 'stratified'], file] }
+      .mix(split_stratified_tables.out.unstratified_tables
+        .map { meta, file -> [meta + [stratification: 'unstratified'], file] })
+      .mix(ch_humann_taxonomy_for_biom)
+
+    // Convert all tables to biom format
+    convert_tables_to_biom(ch_tables_for_biom)
+    
+    // Process HUMAnN tables if enabled
     if (params.process_humann_tables) {
-      // Add genefamilies biom with proper meta.type
-      ch_genefamilies_biom = process_humann_tables.out.genefamilies_biom
-        .map { meta, biom -> 
-          def meta_new = meta.clone()
-          meta_new.put('type', 'genefamilies')
-          [meta_new, biom]
-        }
-      
-      // Add regrouped bioms with proper meta.type (flatten to handle multiple files)
-      ch_regrouped_bioms = process_humann_tables.out.regrouped_bioms
-        .transpose()
-        .map { meta, biom -> 
-          def meta_new = meta.clone()
-          meta_new.put('type', 'regrouped')
-          [meta_new, biom]
-        }
-      
-      ch_bioms_for_splitting = ch_bioms_for_splitting
-        .mix(ch_genefamilies_biom)
-        .mix(ch_regrouped_bioms)
+      // Use only the genefamilies combined tables for processing
+      ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, table -> 
+        meta.type == 'genefamilies' 
+      }
+      regroup_genefamilies(ch_combined_genefamilies)
     }
     
-    // Split each biom file individually
-    split_stratified_tables(ch_bioms_for_splitting)
   }
 
   // MultiQC setup

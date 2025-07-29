@@ -2,6 +2,60 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Current Status: HUMAnN Workflow Simplification (COMPLETED ✅)
+
+**Date**: July 28, 2025  
+**Branch**: `medi`
+
+### Recently Completed Work
+
+**✅ MAJOR WORKFLOW SIMPLIFICATION COMPLETED**
+
+We successfully simplified the HUMAnN processing workflow to improve memory efficiency and maintainability:
+
+**OLD WORKFLOW:**
+```
+HUMAnN TSV → combine → convert to biom → process_humann_tables (regroup) → split stratified
+```
+
+**NEW SIMPLIFIED WORKFLOW:**
+```
+HUMAnN TSV → combine → split stratified → convert to biom → regroup_genefamilies (optional)
+```
+
+### Changes Made
+
+1. **Modified Processes:**
+   - ✅ `split_stratified_tables`: Now works with TSV files directly, outputs stratified/unstratified separately
+   - ✅ `convert_tables_to_biom`: Enhanced to handle stratification metadata in output filenames
+   - ✅ **NEW** `regroup_genefamilies`: Dedicated process for optional regrouping of genefamilies biom files only
+   - ✅ **REMOVED** `process_humann_tables`: Complex monolithic process eliminated
+
+2. **Workflow Logic Updates:**
+   - ✅ Updated `main.nf` to use new process flow
+   - ✅ Added stratification metadata handling ('stratified'/'unstratified'/'combined')
+   - ✅ Regrouping now only applies to genefamilies tables (where most useful)
+   - ✅ Fixed import statements and channel routing
+
+3. **Test Infrastructure Updates:**
+   - ✅ Updated `conf/test.config` with new parameters (`process_humann_tables = true`, `split_size = 2`)
+   - ✅ Fixed container references (`docker_container_humann4`)
+   - ✅ Updated `tests/main.nf.test` expectations for new output structure
+   - ✅ Tests now check for `/combined_tables/` outputs and stratified/unstratified biom files
+
+### Testing Status
+
+- ✅ **Syntax Validation**: Pipeline imports and syntax are correct
+- ⏳ **Integration Tests**: Tests updated but require larger VM to run (memory constraints)
+- 🔄 **Next Step**: Reboot with larger VM size and run `nf-test test` to validate functionality
+
+### Key Benefits
+
+- **Memory Efficiency**: Split stratified on TSV files (smaller) before biom conversion
+- **Cleaner Logic**: Separate concerns - splitting → conversion → regrouping
+- **Selective Processing**: Only regroup genefamilies (most useful tables)
+- **Better Maintainability**: Simpler, more focused processes
+
 ## Overview
 
 This is a Nextflow pipeline for metagenomic read profiling using MetaPhlAn4 and HUMAnN3, with optional MEDI (food microbiome) quantification. The pipeline is based on the original YAMP repository but has been modified for Azure Batch execution with containerized bioinformatics tools.
