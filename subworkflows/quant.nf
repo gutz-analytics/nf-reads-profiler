@@ -51,7 +51,7 @@ workflow MEDI_QUANT {
         }
 
         // Debug: Show incoming reads for each study
-        reads.view { meta, reads_file -> "MEDI_QUANT received: Study=${meta.run}, Sample=${meta.id}, Files=${reads_file}" }
+        // reads.view { meta, reads_file -> "MEDI_QUANT received: Study=${meta.run}, Sample=${meta.id}, Files=${reads_file}" }
 
         // Quality filtering with fastp (handles both single and paired-end reads)
         preprocess(reads)
@@ -61,7 +61,7 @@ workflow MEDI_QUANT {
             .map{meta, reads_files, json, html -> [meta, reads_files]}  // Extract meta and processed reads
 
         // Debug: Show individual samples going to Kraken2
-        kraken_input.view { meta, reads_files -> "MEDI Kraken2 input: Study=${meta.run}, Sample=${meta.id}, Files=${reads_files}" }
+        // kraken_input.view { meta, reads_files -> "MEDI Kraken2 input: Study=${meta.run}, Sample=${meta.id}, Files=${reads_files}" }
         
         // run Kraken2 per sample - maintains clean metadata flow
         kraken(kraken_input)
@@ -70,7 +70,7 @@ workflow MEDI_QUANT {
         kraken_k2_channel = kraken.out.map { meta, k2_file, tsv_file -> [meta, k2_file] }
 
         // Debug: Show individual k2 files with preserved metadata
-        kraken_k2_channel.view { meta, k2_file -> "K2 File: Study=${meta.run}, Sample=${meta.id}, File=${k2_file.name}" }
+        // kraken_k2_channel.view { meta, k2_file -> "K2 File: Study=${meta.run}, Sample=${meta.id}, File=${k2_file.name}" }
 
         architeuthis_filter(kraken_k2_channel)
 
@@ -88,7 +88,7 @@ workflow MEDI_QUANT {
             .set{merge_groups}
         
         // Debug: Show merge groups
-        merge_groups.view { group_key, files -> "Merge Group: Study=${group_key.study}, Level=${group_key.level}, Files=${files.size()}" }
+        // merge_groups.view { group_key, files -> "Merge Group: Study=${group_key.study}, Level=${group_key.level}, Files=${files.size()}" }
         
         merge_taxonomy(merge_groups)
 
