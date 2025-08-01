@@ -2,52 +2,95 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Current Status: HUMAnN Workflow Simplification (COMPLETED ✅)
+## Current Status: HUMAnN Workflow Successfully Deployed and Validated ✅
 
-**Date**: July 28, 2025  
-**Branch**: `medi`
+**Date**: July 29, 2025  
+**Branch**: `simplified_humann_tables`
 
 ### Recently Completed Work
 
-**✅ MAJOR WORKFLOW SIMPLIFICATION COMPLETED**
+**✅ MAJOR WORKFLOW SIMPLIFICATION AND DEPLOYMENT COMPLETED**
 
-We successfully simplified the HUMAnN processing workflow to improve memory efficiency and maintainability:
+We successfully simplified, deployed, and validated the HUMAnN processing workflow with improved memory efficiency, maintainability, and correct file organization.
 
-**OLD WORKFLOW:**
-```
-HUMAnN TSV → combine → convert to biom → process_humann_tables (regroup) → split stratified
-```
-
-**NEW SIMPLIFIED WORKFLOW:**
+**FINAL WORKFLOW:**
 ```
 HUMAnN TSV → combine → split stratified → convert to biom → regroup_genefamilies (optional)
 ```
 
-### Changes Made
+### Completed Changes
 
-1. **Modified Processes:**
-   - ✅ `split_stratified_tables`: Now works with TSV files directly, outputs stratified/unstratified separately
-   - ✅ `convert_tables_to_biom`: Enhanced to handle stratification metadata in output filenames
-   - ✅ **NEW** `regroup_genefamilies`: Dedicated process for optional regrouping of genefamilies biom files only
-   - ✅ **REMOVED** `process_humann_tables`: Complex monolithic process eliminated
+1. **✅ Core Workflow Processes:**
+   - `split_stratified_tables`: Works with TSV files directly, outputs stratified/unstratified separately
+   - `convert_tables_to_biom`: Enhanced with proper stratification metadata and file organization
+   - `regroup_genefamilies`: Dedicated process for optional regrouping of genefamilies biom files only
+   - **REMOVED** `process_humann_tables`: Complex monolithic process eliminated
 
-2. **Workflow Logic Updates:**
-   - ✅ Updated `main.nf` to use new process flow
-   - ✅ Added stratification metadata handling ('stratified'/'unstratified'/'combined')
-   - ✅ Regrouping now only applies to genefamilies tables (where most useful)
-   - ✅ Fixed import statements and channel routing
+2. **✅ Workflow Logic and Channel Routing:**
+   - Updated `main.nf` with proper channel mixing and metadata flow
+   - Fixed stratification metadata propagation (`'stratified'`/`'unstratified'` for functional tables)
+   - Taxonomy tables correctly handled without stratification metadata
+   - Proper error handling for multi-channel outputs
 
-3. **Test Infrastructure Updates:**
-   - ✅ Updated `conf/test.config` with new parameters (`process_humann_tables = true`, `split_size = 2`)
-   - ✅ Fixed container references (`docker_container_humann4`)
-   - ✅ Updated `tests/main.nf.test` expectations for new output structure
-   - ✅ Tests now check for `/combined_tables/` outputs and stratified/unstratified biom files
+3. **✅ File Organization and Publishing:**
+   - Fixed publishDir patterns for all biom file types
+   - Proper directory structure in `combined_bioms/`:
+     - `genefamilies/` - stratified and unstratified biom files
+     - `pathabundance/` - stratified and unstratified biom files  
+     - `reactions/` - stratified and unstratified biom files
+     - `humann_taxonomy/` - combined taxonomy biom files (no stratification)
+     - `metaphlan/` - MetaPhlAn taxonomy biom files
+     - `regrouped/` - regrouped genefamilies biom files (KO and reactions)
 
-### Testing Status
+4. **✅ Database Compatibility Updates:**
+   - Downloaded HUMAnN4 compatible ChocoPhlAn demo database
+   - Updated test configuration for HUMAnN4 containers
+   - Bypassed translated search for database compatibility
+   - Increased memory allocation to 8GB for test processes
 
-- ✅ **Syntax Validation**: Pipeline imports and syntax are correct
-- ⏳ **Integration Tests**: Tests updated but require larger VM to run (memory constraints)
-- 🔄 **Next Step**: Reboot with larger VM size and run `nf-test test` to validate functionality
+### Production Validation Status
+
+- ✅ **Workflow Execution**: Successfully completed on real dataset (3 studies, multiple samples)
+- ✅ **File Organization**: All biom files correctly organized in appropriate subdirectories  
+- ✅ **Stratification Logic**: Proper stratified vs unstratified file generation
+- ✅ **Metadata Flow**: Correct filename generation with stratification info
+- ✅ **Output Quality**: Biologically sensible results with expected feature abundances
+- ✅ **Performance Metrics**: UNMAPPED read percentages within normal ranges (40-85%)
+
+### Current Output Structure Validation
+
+**Sample Output Analysis:**
+- **Derosa_2022**: 40.57% UNMAPPED reads (good quality)
+- **Peters_2019**: 80.48% UNMAPPED reads (normal for complex samples)  
+- **Routy_2018**: 84.39% UNMAPPED reads (normal for complex samples)
+
+**Feature Analysis Completed:**
+- Top abundant features identified across all biom file types
+- Taxonomic consistency verified between MetaPhlAn and HUMAnN taxonomy
+- Functional stratification working correctly with species-level assignments
+- Regrouping producing expected KO and reaction classifications
+
+### Critical Bug Fixes Applied
+
+**🐛 FIXED: Multi-channel Output Error**
+- **Issue**: `Multi-channel output cannot be applied to operator mix` error
+- **Root Cause**: Incorrect channel mixing syntax with multi-output processes  
+- **Solution**: Properly accessed specific output channels (`stratified_tables`, `unstratified_tables`) and applied metadata transformations in workflow
+
+**🐛 FIXED: File Organization Issues**
+- **Issue**: Empty `combined_bioms` subdirectories and `_null` in filenames
+- **Root Cause**: Missing stratification metadata propagation from splitting process
+- **Solution**: Added stratification metadata (`'stratified'`/`'unstratified'`) via `.map()` operations in main workflow
+
+**🐛 FIXED: PublishDir Pattern Matching**
+- **Issue**: Biom files not appearing in correct subdirectories
+- **Root Cause**: PublishDir patterns didn't match actual filename formats
+- **Solution**: Updated patterns to handle both stratified (`*_type_*.biom`) and unstratified (`*_type.biom`) formats
+
+**🐛 FIXED: HUMAnN4 Database Compatibility**  
+- **Issue**: Database version conflicts with HUMAnN4 containers
+- **Root Cause**: Test databases incompatible with newer HUMAnN4 requirements
+- **Solution**: Downloaded compatible ChocoPhlAn v4 demo database and bypassed translated search
 
 ### Key Benefits
 
