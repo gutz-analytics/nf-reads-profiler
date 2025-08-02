@@ -1,0 +1,10 @@
+sample_id,compound_id,source_type,unit,abundance,abundance_sd,abundance_min,abundance_max,name,monomer_mass,kingdom,superclass,class,subclass,CAS
+sample1,2,Nutrient,mg/100g,393.2,100.5,290,500,Proteins,,"","","","",""
+sample1,3,Nutrient,mg/100g,24801.6,646.9,20000,30000,Carbohydrate,,"","","","",""
+sample1,4,Nutrient,mg/100g,238.5,50.2,180,300,Fatty acids,,"","","","",""
+sample1,100,Compound,mg/100g,12.5,2.1,10,15,Test Compound,156.2,Organic compounds,Lipids and lipid-like molecules,Fatty acids,Saturated fatty acids,123-45-6
+sample2,2,Nutrient,mg/100g,445.8,120.3,300,600,Proteins,,"","","","",""
+sample2,3,Nutrient,mg/100g,22500.4,580.7,18000,28000,Carbohydrate,,"","","","",""
+sample2,4,Nutrient,mg/100g,198.7,45.6,150,250,Fatty acids,,"","","","",""
+sample2,100,Compound,mg/100g,15.2,3.4,12,18,Test Compound,156.2,Organic compounds,Lipids and lipid-like molecules,Fatty acids,Saturated fatty acids,123-45-6
+sample2,101,Compound,ug/100g,8.9,1.2,7,11,Another Compound,284.5,Organic compounds,Phenylpropanoids and polyketides,Flavonoids,Anthocyanins,456-78-9

@@ -109,6 +109,9 @@ workflow MEDI_QUANT {
             
         quantify(taxonomy_by_study, foods_file_path, food_contents_file_path)
 
+        // Convert MEDI CSV outputs to BIOM format
+        convert_medi_to_biom(quantify.out)
+
         // quality overview - collect filtered kraken reports by study for multiqc
         kraken_report.out
             .map{meta, file -> [meta.run, file]}  // Group by study
@@ -118,8 +121,8 @@ workflow MEDI_QUANT {
         multiqc(kraken_reports_by_study)
         
     emit:
-        food_abundance = quantify.out.map{it[0]}
-        food_content = quantify.out.map{it[1]}
+        food_abundance = quantify.out.map{it[1]}
+        food_content = quantify.out.map{it[2]}
         taxonomy_counts = add_lineage.out
         qc_report = multiqc.out
         mappings = params.mapping ? merge_mappings.out : Channel.empty()
@@ -419,7 +422,7 @@ process quantify {
     val(food_contents_file_path)
 
     output:
-    tuple path("food_abundance.csv"), path("food_content.csv")
+    tuple val(run), path("food_abundance.csv"), path("food_content.csv")
 
     script:
     """
@@ -479,5 +482,27 @@ process multiqc {
     script:
     """
     multiqc . -f
+    """
+}
+
+process convert_medi_to_biom {
+    tag "${run}"
+    label 'low'
+    container params.docker_container_metaphlan
+    publishDir "${params.outdir}/${params.project}/combined_bioms/medi", mode: "copy", overwrite: true
+
+    input:
+    tuple val(run), path(food_abundance), path(food_content)
+
+    output:
+    tuple val(run), path("*_food_abundance.biom"), path("*_food_content_nutrients.biom"), path("*_food_content_compounds.biom")
+
+    script:
+    """
+    # Convert food abundance to BIOM
+    medi_csv_to_biom.py ${food_abundance} ${run}_food_abundance.biom --type abundance
+    
+    # Convert food content to BIOM (creates both nutrients and compounds files)
+    medi_csv_to_biom.py ${food_content} ${run}_food_content.biom --type content
     """
 }
