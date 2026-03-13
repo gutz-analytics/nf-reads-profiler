@@ -210,6 +210,66 @@ aws s3api put-bucket-lifecycle-configuration \
   --lifecycle-configuration file://lifecycle.json
 ```
 
+## Cost Reduction Levers
+
+### `--humann_spot` — Run HUMAnN on Spot Instances
+
+```bash
+nextflow run main.nf -profile aws --humann_spot true
+```
+
+Default: `false` (on-demand queue for guaranteed completion).
+
+When enabled, HUMAnN runs on the spot queue. At 6hr average runtime, spot eviction
+risk is ~5-8%. The smart errorStrategy retries evicted jobs automatically (up to 3
+attempts). Even with 15% reprocessing overhead, spot saves 60-65% on HUMAnN compute.
+
+**Cost impact at 20K samples**:
+- On-demand: 20K × $2.28 = $45,600
+- Spot with retries: 20K × $0.66 × 1.10 = $14,520
+- **Savings: $31,080**
+
+### `--bypass_translated_search` — Skip Diamond Protein Alignment
+
+```bash
+nextflow run main.nf -profile aws --bypass_translated_search true
+```
+
+Default: `false` (full nucleotide + translated search).
+
+Skips HUMAnN's Diamond protein alignment against UniRef. This reduces runtime from
+~6hr to ~2hr but misses novel genes not in ChocoPhlAn. Use when:
+- Speed matters more than novel gene discovery
+- Samples are from well-characterized environments (human gut)
+- Running a preliminary/screening analysis
+
+**Cost impact at 20K samples**:
+- Full search (6hr): 20K × $2.28 on-demand / $0.66 spot
+- Bypass (2hr): 20K × $0.76 on-demand / $0.22 spot
+- **Savings: $8,800-$30,400** depending on spot choice
+
+### Combined: Spot + Bypass
+
+```bash
+nextflow run main.nf -profile aws --humann_spot true --bypass_translated_search true
+```
+
+This is the most aggressive cost configuration:
+- HUMAnN: ~2hr on spot = $0.22/sample
+- Total pipeline: ~$1.20/sample (well under $3 budget)
+
+### Duplicate MetaPhlAn (Potential Future Optimization)
+
+Currently, MetaPhlAn runs twice per sample:
+1. `profile_taxa` — standalone MetaPhlAn (index: `mpa_vJan25`, 20min)
+2. `profile_function` — HUMAnN's internal MetaPhlAn (index: `mpa_vOct22`, 20min)
+
+These use **different database versions** intentionally (HUMAnN4 requires its
+compatible MetaPhlAn DB). If you align the database versions, HUMAnN can accept
+a pre-computed profile via `--taxonomic-profile`, saving 20min/sample (6,667
+CPU-hours at 20K samples). This requires scientific validation that the newer
+MetaPhlAn DB produces compatible results with HUMAnN4.
+
 ## Seqera vs Built-in Nextflow Monitoring
 
 | Feature | Nextflow (free) | Seqera Platform |

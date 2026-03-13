@@ -426,6 +426,70 @@ def test_cross_config_consistency():
 
 
 # =============================================================================
+# TEST GROUP 16: HUMAnN spot toggle
+# =============================================================================
+def test_humann_spot_toggle():
+    print("\n[16] HUMAnN spot instance toggle")
+    config = read_file('nextflow.config')
+
+    check(
+        'humann_spot' in config,
+        "humann_spot parameter defined in nextflow.config"
+    )
+    check(
+        'humann_spot = false' in config,
+        "humann_spot defaults to false (safe default)"
+    )
+
+    aws = read_file('conf/aws_batch.config')
+    check(
+        'params.humann_spot' in aws,
+        "AWS config references params.humann_spot for queue selection"
+    )
+    check(
+        "spot-queue" in aws and "ondemand-queue" in aws,
+        "AWS config supports both spot and on-demand queues for HUMAnN"
+    )
+
+
+# =============================================================================
+# TEST GROUP 17: bypass_translated_search toggle
+# =============================================================================
+def test_bypass_translated_search():
+    print("\n[17] HUMAnN bypass-translated-search optimization")
+    config = read_file('nextflow.config')
+
+    check(
+        'bypass_translated_search' in config,
+        "bypass_translated_search parameter defined"
+    )
+    check(
+        'bypass_translated_search = false' in config,
+        "bypass_translated_search defaults to false (full analysis)"
+    )
+
+    cc = read_file('modules/community_characterisation.nf')
+    check(
+        'bypass_translated_search' in cc and 'bypass-translated-search' in cc,
+        "profile_function uses bypass_translated_search parameter"
+    )
+
+
+# =============================================================================
+# TEST GROUP 18: submitRateLimit on all cloud profiles
+# =============================================================================
+def test_submit_rate_limits():
+    print("\n[18] API rate limiting on cloud profiles")
+
+    for name, path in [('azure', 'conf/azurebatch.config'), ('aws', 'conf/aws_batch.config')]:
+        config = read_file(path)
+        check(
+            'submitRateLimit' in config,
+            f"{name}: submitRateLimit configured to prevent API throttling"
+        )
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 if __name__ == '__main__':
@@ -448,6 +512,9 @@ if __name__ == '__main__':
     test_error_strategies()
     test_aws_optimizations()
     test_cross_config_consistency()
+    test_humann_spot_toggle()
+    test_bypass_translated_search()
+    test_submit_rate_limits()
 
     print("\n" + "=" * 70)
     print(f"RESULTS: {PASS} passed, {FAIL} failed, {WARN} warnings")

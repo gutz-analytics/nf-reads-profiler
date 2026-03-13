@@ -99,12 +99,14 @@ process profile_function {
   script:
   name = task.ext.name ?: "${meta.id}"
   run = task.ext.run ?: "${meta.run}"
+  bypass_flag = params.bypass_translated_search ? '--bypass-translated-search' : ''
   """
   # HUMAnN 4 will run its own MetaPhlAn profiling internally
   humann \\
     --input $reads \\
     --output . \\
     ${params.humann_params} \\
+    ${bypass_flag} \\
     --output-basename ${name} \\
     --nucleotide-database ${params.chocophlan} \\
     --remove-column-description-output \\
