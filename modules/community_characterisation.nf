@@ -19,6 +19,9 @@ process profile_taxa {
 
   publishDir "${params.outdir}/${params.project}/${run}/taxa", mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
 
+  // Clean up bowtie2 intermediate files after completion (can be 1-5GB per sample)
+  afterScript 'rm -f *.sam *.sam.bz2 *.bowtie2.* *.bt2* 2>/dev/null || true; rm -rf metaphlan_bowtie2_* 2>/dev/null || true'
+
   input:
   tuple val(meta), path(reads)
 
@@ -73,6 +76,11 @@ process profile_function {
   container params.docker_container_humann4
 
   publishDir {"${params.outdir}/${params.project}/${run}/function" }, mode: 'copy', pattern: "*.{tsv,log}"
+
+  // Clean up HUMAnN temp files after completion (can be 10-50GB per sample)
+  // HUMAnN4 creates *_humann_temp/ dirs with bowtie2 indexes, DIAMOND alignments,
+  // ChocoPhlAn database subsets, SAM files, and M8 alignment files.
+  afterScript 'rm -rf *_humann_temp* 2>/dev/null || true; rm -f *.sam *.m8 *.aln 2>/dev/null || true'
 
   input:
   tuple val(meta), path(reads)
