@@ -169,10 +169,11 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 def output_exists(meta) {
   run = meta.run
   name = meta.id
-  pathcoverage_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
-  genefamilies_file = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
-  pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
-  return pathcoverage_file.exists() && genefamilies_file.exists() && pathabundance_file.exists()
+  // Check for HUMAnN4 output files (numbered prefix convention: _2_, _3_, _4_)
+  genefamilies_file = file("${params.outdir}/${params.project}/${run}/function/${name}_2_genefamilies.tsv")
+  reactions_file = file("${params.outdir}/${params.project}/${run}/function/${name}_3_reactions.tsv")
+  pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_4_pathabundance.tsv")
+  return genefamilies_file.exists() && reactions_file.exists() && pathabundance_file.exists()
 }
 
 
@@ -255,12 +256,16 @@ workflow {
   profile_taxa(merged_reads)
 
 
+  // Skip samples that already have completed HUMAnN output (avoids re-running 36h+ jobs)
   ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
-  
+
+  // Log skipped samples
+  merged_reads.filter { meta, reads -> output_exists(meta) }
+    .map { meta, reads -> log.info "Skipping HUMAnN for ${meta.id} (output already exists)" }
 
   // Functional profiling (HUMAnN4) if not skipped
   if ( ! params.skipHumann ) {
-    profile_function(merged_reads)
+    profile_function(ch_filtered_reads)
 
     ch_genefamilies = profile_function.out.profile_function_gf
                 .map { meta, table ->
@@ -332,13 +337,13 @@ workflow {
       error "MEDI quantification requires: medi_db_path, medi_foods_file, and medi_food_contents_file parameters"
     }
     
-    // Group raw reads (from FASTERQ_DUMP/local) by study for MEDI processing
-    // The MEDI subworkflow will handle fastp preprocessing internally
-    read_check.pass
-      .map{meta, reads, count -> 
+    // Group cleaned reads by study for MEDI processing
+    // Uses already-cleaned reads from clean_reads to avoid running fastp twice
+    clean_reads.out.reads_cleaned
+      .map{meta, reads ->
         // Create grouping metadata with study information
         def group_meta = meta.subMap('run')  // Extract study grouping key
-        [group_meta, meta, reads]  // Use raw reads, not cleaned
+        [group_meta, meta, reads]
       }
       .groupTuple(by: [0])  // Group by study
       .map{group_meta, metas, reads_files ->
@@ -353,7 +358,8 @@ workflow {
     MEDI_QUANT(
       studies_with_samples,
       params.medi_foods_file,
-      params.medi_food_contents_file
+      params.medi_food_contents_file,
+      true  // reads are pre-cleaned by clean_reads, skip MEDI's own fastp
     )
   }
 

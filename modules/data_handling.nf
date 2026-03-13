@@ -1,6 +1,6 @@
 process AWS_DOWNLOAD {
     tag "$meta.id"
-    label 'process_low'
+    label 'low'
 
     conda "conda-forge::awscli"
     container params.docker_container_aws
@@ -25,7 +25,6 @@ process AWS_DOWNLOAD {
 
 process FASTERQ_DUMP {
     tag "$meta.id"
-    label 'process_medium'
 
     conda "bioconda::sra-tools=3.0.8"
     container params.docker_container_sra

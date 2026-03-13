@@ -39,26 +39,26 @@ workflow MEDI_QUANT {
         studies_with_samples // channel of [study_id, [samples]] where samples are [[meta, reads], ...]
         foods_file_path      // String path to foods file on mounted filesystem
         food_contents_file_path  // String path to food contents file on mounted filesystem
-        
+        precleaned           // boolean: true if reads are already QC'd (skip fastp)
+
     main:
         Channel
             .fromList(["D", "G", "S"])
             .set{levels}
 
         // Flatten studies back to individual samples for processing
-        reads = studies_with_samples.flatMap{study_id, samples -> 
+        reads = studies_with_samples.flatMap{study_id, samples ->
             samples.collect{meta, reads -> [meta, reads]}
         }
 
-        // Debug: Show incoming reads for each study
-        // reads.view { meta, reads_file -> "MEDI_QUANT received: Study=${meta.run}, Sample=${meta.id}, Files=${reads_file}" }
-
-        // Quality filtering with fastp (handles both single and paired-end reads)
-        preprocess(reads)
-
-        // Process each sample individually - no batching needed with ramdisk
-        kraken_input = preprocess.out
-            .map{meta, reads_files, json, html -> [meta, reads_files]}  // Extract meta and processed reads
+        // Quality filtering: skip if reads already cleaned by main workflow
+        if (precleaned) {
+            kraken_input = reads
+        } else {
+            preprocess(reads)
+            kraken_input = preprocess.out
+                .map{meta, reads_files, json, html -> [meta, reads_files]}
+        }
 
         // Debug: Show individual samples going to Kraken2
         // kraken_input.view { meta, reads_files -> "MEDI Kraken2 input: Study=${meta.run}, Sample=${meta.id}, Files=${reads_files}" }
@@ -134,7 +134,7 @@ process preprocess {
     tag "$name"
     label 'low'
     container params.docker_container_fastp
-    publishDir "${params.outdir}/${params.project}/${run}/medi/preprocessed"
+    publishDir "${params.outdir}/${params.project}/${run}/medi/preprocessed", mode: 'copy'
 
     input:
     tuple val(meta), path(reads)
@@ -170,7 +170,7 @@ process kraken {
     label 'kraken'
     scratch false
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2"
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", mode: 'copy'
 
     containerOptions '--volume /tmp/ramdisk:/tmp/ramdisk'
 
@@ -307,7 +307,7 @@ process architeuthis_filter {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", mode: 'copy', overwrite: true
 
     input:
     tuple val(meta), path(k2)
@@ -331,7 +331,7 @@ process kraken_report {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", mode: 'copy', overwrite: true
 
     input:
     tuple val(meta), path(k2)
@@ -351,7 +351,7 @@ process summarize_mappings {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/architeuthis"
+    publishDir "${params.outdir}/${params.project}/${run}/medi/architeuthis", mode: 'copy'
 
     input:
     tuple val(meta), path(k2)
@@ -390,7 +390,7 @@ process count_taxa {
     tag "${name}_${lev}"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/bracken", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi/bracken", mode: 'copy', overwrite: true
 
     input:
     tuple val(meta), path(report), val(lev)

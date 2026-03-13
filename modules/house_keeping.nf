@@ -103,6 +103,7 @@ process clean_reads {
     --thread ${task.cpus}
 
     cat out.R1.fq.gz out.R2.fq.gz > ${name}_trimmed.fq.gz
+    rm -f out.R1.fq.gz out.R2.fq.gz
     """
   }
 }
