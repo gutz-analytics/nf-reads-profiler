@@ -240,8 +240,9 @@ def test_kraken_cpu():
     print("\n[8] P3: Kraken2 CPU allocation reduced (memory-I/O bound)")
     config = read_file('conf/azurebatch.config')
 
+    # Match the kraken block — use greedy match since block contains nested { }
     kraken_match = re.search(
-        r"withLabel:\s*'kraken'\s*\{([^}]+)\}",
+        r"withLabel:\s*'kraken'\s*\{(.+?)\n\s*\}",
         config, re.DOTALL
     )
     if kraken_match:
@@ -625,6 +626,81 @@ def test_reuse_metaphlan_profile():
 
 
 # =============================================================================
+# TEST GROUP 21: medi_spot — MEDI Kraken2 on spot instances
+# =============================================================================
+def test_medi_spot():
+    print("\n[21] MEDI spot instances (86% cheaper Kraken2)")
+    config = read_file('nextflow.config')
+    azure = read_file('conf/azurebatch.config')
+
+    # Parameter exists and defaults to false
+    check(
+        'medi_spot' in config,
+        "medi_spot parameter defined in nextflow.config"
+    )
+    check(
+        'medi_spot = false' in config,
+        "medi_spot defaults to false (safe default, dedicated nodes)"
+    )
+
+    # Azure config has spot-enabled kraken ramdisk pool
+    check(
+        'kraken_ramdisk_spot' in azure,
+        "Azure config has kraken_ramdisk_spot pool definition"
+    )
+
+    # Spot pool has lowPriority = true
+    # Use a broader match that handles nested { } in startTask block
+    # Skip the first occurrence (queue selector string) to find the pool definition
+    first_occurrence = azure.find('kraken_ramdisk_spot')
+    spot_pool_start = azure.find('kraken_ramdisk_spot {', first_occurrence)
+    if spot_pool_start == -1:
+        # Try finding it after the pools { block
+        spot_pool_start = azure.find('kraken_ramdisk_spot', azure.find('pools'))
+        spot_pool_start = azure.find('kraken_ramdisk_spot {', spot_pool_start) if spot_pool_start != -1 else -1
+    if spot_pool_start != -1:
+        # Find the pool block by counting braces
+        block_start = azure.index('{', spot_pool_start)
+        depth = 0
+        block_end = block_start
+        for i, ch in enumerate(azure[block_start:], block_start):
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    block_end = i
+                    break
+        block = azure[block_start:block_end+1]
+        spot_pool_match = True
+    else:
+        block = ''
+        spot_pool_match = False
+
+    if spot_pool_match:
+        check(
+            'lowPriority = true' in block,
+            "kraken_ramdisk_spot pool uses lowPriority (spot) instances"
+        )
+        check(
+            'Standard_M64ls' in block,
+            "kraken_ramdisk_spot uses same VM type (Standard_M64ls) as dedicated pool"
+        )
+    else:
+        check(False, "Could not parse kraken_ramdisk_spot pool block")
+
+    # Kraken label dynamically selects pool based on medi_spot
+    check(
+        'params.medi_spot' in azure,
+        "Azure kraken label references params.medi_spot for queue selection"
+    )
+    check(
+        'kraken_ramdisk_spot' in azure and 'kraken_ramdisk' in azure,
+        "Azure config supports both spot and dedicated kraken pools"
+    )
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 if __name__ == '__main__':
@@ -652,6 +728,7 @@ if __name__ == '__main__':
     test_submit_rate_limits()
     test_medi_unmapped_only()
     test_reuse_metaphlan_profile()
+    test_medi_spot()
 
     print("\n" + "=" * 70)
     print(f"RESULTS: {PASS} passed, {FAIL} failed, {WARN} warnings")

@@ -288,10 +288,12 @@ to `6hr + ~2hr = ~8hr`. But compute cost drops because Kraken2 processes fewer r
 **Fallback behavior**: Samples with existing HUMAnN output (skipped by `output_exists()`)
 automatically receive all cleaned reads, since no unaligned file was produced for them.
 
-**Cost impact at 20K samples** (Azure, kraken_ramdisk pool at ~$6.67/hr):
-- Default (all reads, 3hr): 20K × 3hr × $6.67 = $400,200
-- Unmapped-only (~60% of reads, ~2.2hr): 20K × 2.2hr × $6.67 = $293,480
-- **Savings: ~$106,720 (27%)**
+**Cost impact at 20K samples** (Azure, Standard_M64ls):
+- Dedicated, all reads (3hr): 20K × 3hr × $5.42 = $325,200
+- Dedicated, unmapped-only (2.2hr): 20K × 2.2hr × $5.42 = $238,480
+- **Spot, all reads (3hr)**: 20K × 3hr × $0.76 = **$45,600**
+- **Spot, unmapped-only (2.2hr)**: 20K × 2.2hr × $0.76 = **$33,440**
+- **Savings: $279,600-$291,760** (spot) or ~$86,720 (dedicated, unmapped-only)
 
 #### Tutorial: Validating medi_unmapped_only
 
@@ -379,21 +381,54 @@ assignments.
    change. Compare `*_1_metaphlan_profile.tsv` output between runs with and without
    the flag to assess impact for your dataset.
 
+### `--medi_spot` — Run MEDI Kraken2 on Spot Instances
+
+```bash
+nextflow run main.nf -profile azure --enable_medi --medi_spot true
+```
+
+Default: `false` (dedicated Standard_M64ls at $5.42/hr).
+
+**Problem**: MEDI's `kraken_ramdisk` pool uses dedicated Standard_M64ls nodes (512GB RAM)
+at $5.42/hr. This is the single largest cost driver in the pipeline — more expensive than
+HUMAnN.
+
+**Fix**: When enabled, the kraken process uses `kraken_ramdisk_spot` pool instead (same
+VM, spot pricing at ~$0.76/hr — 86% discount). The ramdisk is set up by `startTask` and
+persists for the node's lifetime. If the node is evicted, the errorStrategy retries on a
+new node (DB reload takes ~10-15min).
+
+**Risk**: At ~2-3hr per sample, spot eviction risk is low (~2-3%). Even with 10%
+reprocessing overhead, spot still saves 85%+ vs dedicated.
+
+**Cost impact at 20K samples** (Azure, Standard_M64ls):
+- Dedicated (3hr): 20K × 3hr × $5.42 = $325,200
+- Spot (3hr, ~5% retries): 20K × 3hr × $0.76 × 1.05 = **$47,880**
+- **Savings: ~$277,320 (85%)**
+
 ### Combined: Maximum Cost Savings
 
 ```bash
-nextflow run main.nf -profile aws \
+nextflow run main.nf -profile azure \
   --humann_spot true \
-  --bypass_translated_search true \
   --reuse_metaphlan_profile true \
-  --enable_medi --medi_unmapped_only true
+  --enable_medi --medi_spot true --medi_unmapped_only true
 ```
 
 At 20K samples, this configuration yields:
-- HUMAnN on spot with bypass: $0.22/sample
-- MetaPhlAn (single run): $0.19/sample
-- MEDI on unmapped reads: ~$14.67/sample (reduced from $20/sample)
-- **Total: ~$1.08/sample** (well under $3 budget)
+
+| Component | Config | Cost/sample | 20K total |
+|-----------|--------|-------------|-----------|
+| HUMAnN (6hr) | spot | $0.66 | $13,200 |
+| MetaPhlAn (20min × 1) | spot, reuse profile | $0.19 | $3,867 |
+| MEDI Kraken2 (~2.2hr) | spot, unmapped-only | $1.67 | $33,440 |
+| fastp + misc | spot | $0.05 | $1,000 |
+| **Total** | | **$2.57/sample** | **$51,507** |
+
+**Without MEDI**: $0.90/sample ($18,067 total)
+
+Add `--bypass_translated_search true` to drop HUMAnN to 2hr on spot ($0.22/sample)
+for a total of **~$1.93/sample** with full MEDI, or **$0.46/sample** without MEDI.
 
 ## Seqera vs Built-in Nextflow Monitoring
 
