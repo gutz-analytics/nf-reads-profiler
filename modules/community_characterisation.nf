@@ -80,6 +80,7 @@ process profile_function {
   // Clean up HUMAnN temp files after completion (can be 10-50GB per sample)
   // HUMAnN4 creates *_humann_temp/ dirs with bowtie2 indexes, DIAMOND alignments,
   // ChocoPhlAn database subsets, SAM files, and M8 alignment files.
+  // When medi_unmapped_only is enabled, we preserve *_unaligned.fa before cleanup.
   afterScript 'rm -rf *_humann_temp* 2>/dev/null || true; rm -f *.sam *.m8 *.aln 2>/dev/null || true'
 
   input:
@@ -92,6 +93,7 @@ process profile_function {
   tuple val(meta), path("*_3_reactions.tsv"), emit: profile_function_reactions
   tuple val(meta), path("*_4_pathabundance.tsv"), emit: profile_function_pa
   tuple val(meta), path("*_profile_functions_mqc.yaml"), emit: profile_function_log
+  tuple val(meta), path("*_unaligned.fastq.gz"), optional: true, emit: unaligned_reads
 
   when:
   params.annotation
@@ -100,6 +102,7 @@ process profile_function {
   name = task.ext.name ?: "${meta.id}"
   run = task.ext.run ?: "${meta.run}"
   bypass_flag = params.bypass_translated_search ? '--bypass-translated-search' : ''
+  preserve_unaligned = params.medi_unmapped_only && params.enable_medi ? 'true' : 'false'
   """
   # HUMAnN 4 will run its own MetaPhlAn profiling internally
   humann \\
@@ -116,6 +119,31 @@ process profile_function {
     --pathways metacyc \\
     --threads ${task.cpus} \\
     --memory-use minimum
+
+  # Preserve unaligned reads for MEDI if medi_unmapped_only is enabled.
+  # HUMAnN temp dir contains *_diamond_unaligned.fa (reads not in ChocoPhlAn OR UniRef)
+  # and *_bowtie2_unaligned.fa (reads not in ChocoPhlAn only).
+  # We use diamond_unaligned when available (fully unmapped), falling back to bowtie2_unaligned
+  # (for bypass_translated_search mode where Diamond doesn't run).
+  if [ "${preserve_unaligned}" = "true" ]; then
+    unaligned_fa=""
+    if [ -f ${name}_humann_temp/${name}_diamond_unaligned.fa ]; then
+      unaligned_fa="${name}_humann_temp/${name}_diamond_unaligned.fa"
+    elif [ -f ${name}_humann_temp/${name}_bowtie2_unaligned.fa ]; then
+      unaligned_fa="${name}_humann_temp/${name}_bowtie2_unaligned.fa"
+    fi
+
+    if [ -n "\$unaligned_fa" ] && [ -s "\$unaligned_fa" ]; then
+      # Convert FASTA to FASTQ (Kraken2 accepts both, but gzipped FASTQ is consistent
+      # with the rest of the pipeline). Assign quality score of 'I' (Q40) since these
+      # reads already passed QC in clean_reads.
+      awk 'BEGIN{OFS="\\n"} /^>/{name=substr(\$0,2); next} {print "@"name, \$0, "+", gensub(/./, "I", "g", \$0)}' \\
+        "\$unaligned_fa" | gzip -1 > ${name}_unaligned.fastq.gz
+      echo "Preserved \$(zcat ${name}_unaligned.fastq.gz | wc -l | awk '{print \$1/4}') unaligned reads for MEDI"
+    else
+      echo "No unaligned reads found in HUMAnN temp directory (sample may have 0% unaligned)"
+    fi
+  fi
 
   # MultiQC doesn't have a module for humann yet. As a consequence, I
   # had to create a YAML file with all the info I need via a bash script

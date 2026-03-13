@@ -336,24 +336,42 @@ workflow {
     if (!params.medi_db_path || !params.medi_foods_file || !params.medi_food_contents_file) {
       error "MEDI quantification requires: medi_db_path, medi_foods_file, and medi_food_contents_file parameters"
     }
-    
-    // Group cleaned reads by study for MEDI processing
-    // Uses already-cleaned reads from clean_reads to avoid running fastp twice
-    clean_reads.out.reads_cleaned
+
+    // Choose MEDI input: unmapped reads from HUMAnN (if available) or all cleaned reads
+    // When medi_unmapped_only=true and HUMAnN ran, MEDI gets only reads that didn't map
+    // to any microbial gene database (ChocoPhlAn + UniRef). Since MEDI classifies
+    // plant/animal food DNA, these populations barely overlap — saving ~27% on Kraken2.
+    if (params.medi_unmapped_only && !params.skipHumann) {
+      // Use HUMAnN-unmapped reads. For samples where HUMAnN was skipped (output_exists),
+      // fall back to all cleaned reads since no unaligned file was produced.
+      ch_humann_unaligned = profile_function.out.unaligned_reads
+
+      // Samples that had existing HUMAnN output (skipped) still need MEDI on all reads
+      ch_skipped_samples = merged_reads.filter { meta, reads -> output_exists(meta) }
+
+      // Combine: unmapped reads for HUMAnN-processed samples + all reads for skipped samples
+      medi_input_reads = ch_humann_unaligned.mix(ch_skipped_samples)
+
+      log.info "MEDI will process HUMAnN-unmapped reads (medi_unmapped_only=true)"
+    } else {
+      // Default: MEDI gets all cleaned reads
+      medi_input_reads = clean_reads.out.reads_cleaned
+    }
+
+    // Group reads by study for MEDI processing
+    medi_input_reads
       .map{meta, reads ->
-        // Create grouping metadata with study information
-        def group_meta = meta.subMap('run')  // Extract study grouping key
+        def group_meta = meta.subMap('run')
         [group_meta, meta, reads]
       }
-      .groupTuple(by: [0])  // Group by study
+      .groupTuple(by: [0])
       .map{group_meta, metas, reads_files ->
-        // Flatten back to individual sample format but maintain study grouping info
         def study = group_meta.run
         def samples = [metas, reads_files].transpose().collect{meta, reads -> [meta, reads]}
         [study, samples]
       }
       .set{studies_with_samples}
-    
+
     // Pass all studies to MEDI subworkflow - it will process each study group
     MEDI_QUANT(
       studies_with_samples,

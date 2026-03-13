@@ -490,6 +490,75 @@ def test_submit_rate_limits():
 
 
 # =============================================================================
+# TEST GROUP 19: medi_unmapped_only — HUMAnN-unmapped reads to MEDI
+# =============================================================================
+def test_medi_unmapped_only():
+    print("\n[19] MEDI unmapped-only mode (feed HUMAnN-unaligned reads to MEDI)")
+    config = read_file('nextflow.config')
+    main = read_file('main.nf')
+    cc = read_file('modules/community_characterisation.nf')
+
+    # Parameter exists and defaults to false
+    check(
+        'medi_unmapped_only' in config,
+        "medi_unmapped_only parameter defined in nextflow.config"
+    )
+    check(
+        'medi_unmapped_only = false' in config,
+        "medi_unmapped_only defaults to false (safe default, no serial dependency)"
+    )
+
+    # profile_function emits unaligned reads as optional output
+    check(
+        'unaligned_reads' in cc,
+        "profile_function has 'unaligned_reads' emit channel"
+    )
+    check(
+        'optional: true' in cc and 'unaligned' in cc,
+        "unaligned_reads output is marked optional (not all samples produce it)"
+    )
+
+    # Script preserves unaligned reads from HUMAnN temp dir
+    check(
+        'diamond_unaligned.fa' in cc,
+        "Script checks for diamond_unaligned.fa (fully unmapped reads)"
+    )
+    check(
+        'bowtie2_unaligned.fa' in cc,
+        "Script falls back to bowtie2_unaligned.fa (for bypass_translated_search mode)"
+    )
+
+    # FASTA to FASTQ conversion for pipeline consistency
+    check(
+        'fastq.gz' in cc and 'unaligned' in cc,
+        "Unaligned reads converted to gzipped FASTQ for pipeline consistency"
+    )
+
+    # main.nf routes unmapped reads when flag is set
+    check(
+        'medi_unmapped_only' in main,
+        "main.nf references medi_unmapped_only parameter"
+    )
+    check(
+        'profile_function.out.unaligned_reads' in main,
+        "main.nf uses profile_function unaligned_reads channel for MEDI input"
+    )
+
+    # Fallback: samples with existing HUMAnN output get all cleaned reads
+    check(
+        'output_exists(meta)' in main and 'ch_skipped_samples' in main,
+        "Skipped samples (existing HUMAnN output) fall back to all cleaned reads"
+    )
+
+    # Conditional: only activates when both medi_unmapped_only AND HUMAnN runs
+    check(
+        'params.medi_unmapped_only && !params.skipHumann' in main
+        or 'params.medi_unmapped_only && ! params.skipHumann' in main,
+        "medi_unmapped_only only activates when HUMAnN is enabled (skipHumann=false)"
+    )
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 if __name__ == '__main__':
@@ -515,6 +584,7 @@ if __name__ == '__main__':
     test_humann_spot_toggle()
     test_bypass_translated_search()
     test_submit_rate_limits()
+    test_medi_unmapped_only()
 
     print("\n" + "=" * 70)
     print(f"RESULTS: {PASS} passed, {FAIL} failed, {WARN} warnings")

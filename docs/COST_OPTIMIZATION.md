@@ -258,6 +258,67 @@ This is the most aggressive cost configuration:
 - HUMAnN: ~2hr on spot = $0.22/sample
 - Total pipeline: ~$1.20/sample (well under $3 budget)
 
+### `--medi_unmapped_only` — Feed Only HUMAnN-Unmapped Reads to MEDI
+
+```bash
+nextflow run main.nf -profile azure --enable_medi --medi_unmapped_only true
+```
+
+Default: `false` (MEDI gets all cleaned reads, runs in parallel with HUMAnN).
+
+**How it works**: HUMAnN maps reads against microbial gene databases (ChocoPhlAn +
+UniRef). MEDI classifies reads against plant/animal food genomes. These are almost
+entirely non-overlapping read populations. When enabled, `profile_function` preserves
+its unaligned reads file (`*_diamond_unaligned.fa` or `*_bowtie2_unaligned.fa`) and
+converts it to FASTQ for MEDI's Kraken2 input.
+
+**Tradeoff**: Adds a serial dependency — MEDI waits for HUMAnN to finish (~6hr)
+instead of running in parallel. Wall-clock time increases from `max(6hr, 3hr) = 6hr`
+to `6hr + ~2hr = ~8hr`. But compute cost drops because Kraken2 processes fewer reads.
+
+**When to use**:
+- Cost-sensitive batch runs where wall-clock time doesn't matter
+- Reruns where HUMAnN output already exists (unmapped reads could be cached)
+- When you want maximum MEDI precision (fewer false-positive k-mer collisions)
+
+**When NOT to use**:
+- Real-time or latency-sensitive workflows
+- When `skipHumann=true` (falls back to all reads automatically)
+
+**Fallback behavior**: Samples with existing HUMAnN output (skipped by `output_exists()`)
+automatically receive all cleaned reads, since no unaligned file was produced for them.
+
+**Cost impact at 20K samples** (Azure, kraken_ramdisk pool at ~$6.67/hr):
+- Default (all reads, 3hr): 20K × 3hr × $6.67 = $400,200
+- Unmapped-only (~60% of reads, ~2.2hr): 20K × 2.2hr × $6.67 = $293,480
+- **Savings: ~$106,720 (27%)**
+
+#### Tutorial: Validating medi_unmapped_only
+
+1. **Run with the flag**:
+   ```bash
+   nextflow run main.nf -profile azure \
+     --enable_medi --medi_unmapped_only true \
+     --input samplesheet.csv --project test_unmapped
+   ```
+
+2. **Check that unaligned reads were preserved** (in trace.txt):
+   ```bash
+   # Look for "Preserved X unaligned reads for MEDI" in profile_function logs
+   grep "Preserved.*unaligned reads" <outdir>/test_unmapped/*/function/*.log
+   ```
+
+3. **Compare read counts** — MEDI input should be 40-85% of original:
+   ```bash
+   # From trace.txt, compare rchar (bytes read) between:
+   # - kraken tasks (MEDI Kraken2 input size)
+   # - profile_function tasks (full cleaned reads input size)
+   awk -F'\t' 'NR==1 || /kraken|profile_function/' trace.txt | column -t
+   ```
+
+4. **Validate food quantification** — results should be similar (not identical)
+   to a run without the flag, since the removed reads were microbial, not food DNA.
+
 ### Duplicate MetaPhlAn (Potential Future Optimization)
 
 Currently, MetaPhlAn runs twice per sample:
