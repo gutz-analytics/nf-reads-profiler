@@ -192,7 +192,12 @@ process kraken {
     from subprocess import run, check_call, CalledProcessError
     import time
 
+    # Prefer NVMe-cached database if available, then fall back to network path
+    local_cache = "${params.local_db_cache ?: ''}"
     db_source = "${params.medi_db_path}"
+    if local_cache and os.path.isdir(os.path.join(local_cache, "medi_db")):
+        db_source = os.path.join(local_cache, "medi_db")
+        print(f"Using NVMe-cached MEDI database: {db_source}")
     ramdisk_mount = "/tmp/ramdisk"  # Use the ramdisk created by startTask
     sample_name = "${name}"
     

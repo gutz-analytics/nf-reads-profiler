@@ -2,7 +2,7 @@
 
 nextflow.enable.dsl=2
 
-include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables; combine_humann_taxonomy_tables; convert_tables_to_biom; split_stratified_tables; regroup_genefamilies } from './modules/community_characterisation'
+include { profile_taxa; profile_function } from './modules/community_characterisation'
 include { MULTIQC; get_software_versions; clean_reads; count_reads} from './modules/house_keeping'
 include { AWS_DOWNLOAD; FASTERQ_DUMP  } from './modules/data_handling'
 include { MEDI_QUANT } from './subworkflows/quant'
@@ -280,69 +280,8 @@ workflow {
     }
 
     profile_function(ch_humann_input)
-
-    ch_genefamilies = profile_function.out.profile_function_gf
-                .map { meta, table ->
-                    def meta_new = meta - meta.subMap('id')
-                    meta_new.put('type','genefamilies')
-                    [ meta_new, table ]
-                }
-                .groupTuple()
-
-    ch_reactions = profile_function.out.profile_function_reactions
-                .map { meta, table ->
-                    def meta_new = meta - meta.subMap('id')
-                    meta_new.put('type','reactions')
-                    [ meta_new, table ]
-                }
-                .groupTuple()
-
-    ch_pathabundance = profile_function.out.profile_function_pa
-                .map { meta, table ->
-                    def meta_new = meta - meta.subMap('id')
-                    meta_new.put('type','pathabundance')
-                    [ meta_new, table ]
-                }
-                .groupTuple()
-
-    // HUMAnN-generated taxonomy profiles (separate from independent MetaPhlAn)
-    ch_humann_taxonomy = profile_function.out.profile_function_metaphlan
-                .map { meta, table ->
-                    def meta_new = meta - meta.subMap('id')
-                    meta_new.put('type','metaphlan_profile')
-                    [ meta_new, table ]
-                }
-                .groupTuple()
-
-    combine_humann_tables(ch_genefamilies.mix(ch_reactions, ch_pathabundance))
-    
-    // Also combine HUMAnN-generated taxonomy profiles
-    combine_humann_taxonomy_tables(ch_humann_taxonomy)
-    
-    // Get output tsv tables for conversion to biom
-    ch_tables_for_splitting = combine_humann_tables.out
-    
-    // Add combined HUMAnN taxonomy tables to biom conversion
-    ch_humann_taxonomy_for_biom = combine_humann_taxonomy_tables.out.combined_tsv
-                .map { meta, table ->
-                    def meta_new = meta.clone()
-                    meta_new.put('type','humann_taxonomy')
-                    [ meta_new, table ]
-                }
-    
   }
 
-
-  // Metaphlan
-  ch_metaphlan = profile_taxa.out.to_profile_function_bugs
-            .map {
-              meta, table ->
-                  def meta_new = meta - meta.subMap('id')
-              [ meta_new, table ]
-            }
-            .groupTuple()
-            
-  combine_metaphlan_tables(ch_metaphlan)
 
   // MEDI quantification workflow
   if (params.enable_medi) {
@@ -393,37 +332,6 @@ workflow {
       params.medi_food_contents_file,
       true  // reads are pre-cleaned by clean_reads, skip MEDI's own fastp
     )
-  }
-
-  // Split stratified tables for biom files
-  if (!params.skipHumann && params.annotation) {
-
-    
-
-    // Split output tsv into stratified and unstratified 
-
-    // Split raw output tables into stratified and unstratified
-    split_stratified_tables(ch_tables_for_splitting)
-    
-    // Make channel for biom conversion - combine both stratified and unstratified outputs
-    ch_tables_for_biom = split_stratified_tables.out.stratified_tables
-      .map { meta, file -> [meta + [stratification: 'stratified'], file] }
-      .mix(split_stratified_tables.out.unstratified_tables
-        .map { meta, file -> [meta + [stratification: 'unstratified'], file] })
-      .mix(ch_humann_taxonomy_for_biom)
-
-    // Convert all tables to biom format
-    convert_tables_to_biom(ch_tables_for_biom)
-    
-    // Process HUMAnN tables if enabled
-    if (params.process_humann_tables) {
-      // Use only the genefamilies combined tables for processing
-      ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, table -> 
-        meta.type == 'genefamilies' 
-      }
-      regroup_genefamilies(ch_combined_genefamilies)
-    }
-    
   }
 
   // MultiQC setup

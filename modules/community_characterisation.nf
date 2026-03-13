@@ -41,8 +41,25 @@ process profile_taxa {
   // consume via --taxonomic-profile. We run MetaPhlAn once as TSV (with rel_ab_w_read_stats
   // which HUMAnN requires) then convert to biom — avoiding a double MetaPhlAn run.
   produce_tsv = params.reuse_metaphlan_profile ? 'true' : 'false'
+  // Use local NVMe-cached database if available (AWS), otherwise fall back to network path
+  db_cache = params.local_db_cache ?: ''
+  metaphlan_db_dir = params.metaphlan_db
   """
-  echo ${params.metaphlan_db}
+  # Resolve MetaPhlAn database path: prefer local NVMe cache over network storage
+  DB_DIR="${metaphlan_db_dir}"
+  if [ -n "${db_cache}" ] && [ -d "${db_cache}/metaphlan/vJan25" ]; then
+    DB_DIR="${db_cache}/metaphlan/vJan25"
+    echo "Using NVMe-cached MetaPhlAn database: \$DB_DIR"
+  elif [ -n "${db_cache}" ] && [ -d "${db_cache}/metaphlan" ]; then
+    # Try to find any metaphlan version directory
+    FOUND_DIR=\$(ls -d ${db_cache}/metaphlan/*/  2>/dev/null | head -1)
+    if [ -n "\$FOUND_DIR" ]; then
+      DB_DIR="\$FOUND_DIR"
+      echo "Using NVMe-cached MetaPhlAn database: \$DB_DIR"
+    fi
+  else
+    echo "Using network MetaPhlAn database: \$DB_DIR"
+  fi
 
   if [ "${produce_tsv}" = "true" ]; then
     # Single MetaPhlAn run producing TSV (for HUMAnN) then convert to biom
@@ -50,7 +67,7 @@ process profile_taxa {
       --input_type fastq \\
       --tmp_dir . \\
       --index ${params.metaphlan_index} \\
-      --db_dir ${params.metaphlan_db} \\
+      --db_dir \$DB_DIR \\
       --bt2_ps ${params.bt2options} \\
       --sample_id ${name} \\
       -t rel_ab_w_read_stats \\
@@ -59,7 +76,7 @@ process profile_taxa {
       --output_file ${name}_metaphlan_profile.tsv \\
       $reads
 
-    # Convert TSV to biom for downstream combine_metaphlan_tables
+    # Convert TSV to biom for downstream
     biom convert \\
       --input-fp ${name}_metaphlan_profile.tsv \\
       --output-fp ${name}_metaphlan.biom \\
@@ -72,7 +89,7 @@ process profile_taxa {
       --input_type fastq \\
       --tmp_dir . \\
       --index ${params.metaphlan_index} \\
-      --db_dir ${params.metaphlan_db} \\
+      --db_dir \$DB_DIR \\
       --bt2_ps ${params.bt2options} \\
       --sample_id ${name} \\
       --biom_format_output \\
@@ -132,7 +149,32 @@ process profile_function {
   // run entirely (~20min savings per sample). The profile must be in MetaPhlAn TSV format.
   tax_profile_flag = (tax_profile.name != 'NO_TAXONOMY_PROFILE') ? "--taxonomic-profile ${tax_profile}" : ''
   metaphlan_opts = (tax_profile.name != 'NO_TAXONOMY_PROFILE') ? '' : "--metaphlan-options \"-t rel_ab_w_read_stats --index ${params.humann_metaphlan_index} --bowtie2db ${params.humann_metaphlan_db} --bt2_ps ${params.bt2options}\""
+  // Use local NVMe-cached databases if available (AWS), otherwise fall back to network paths
+  db_cache = params.local_db_cache ?: ''
+  chocophlan_default = params.chocophlan
+  uniref_default = params.uniref
+  utility_default = params.utility_mapping
   """
+  # Resolve HUMAnN database paths: prefer local NVMe cache over network storage
+  CHOCOPHLAN="${chocophlan_default}"
+  UNIREF="${uniref_default}"
+  UTILITY="${utility_default}"
+
+  if [ -n "${db_cache}" ]; then
+    if [ -d "${db_cache}/humann/chocophlan" ]; then
+      CHOCOPHLAN="${db_cache}/humann/chocophlan"
+      echo "Using NVMe-cached ChocoPhlAn: \$CHOCOPHLAN"
+    fi
+    if [ -d "${db_cache}/humann/uniref" ]; then
+      UNIREF="${db_cache}/humann/uniref"
+      echo "Using NVMe-cached UniRef: \$UNIREF"
+    fi
+    if [ -d "${db_cache}/humann/utility_mapping" ]; then
+      UTILITY="${db_cache}/humann/utility_mapping"
+      echo "Using NVMe-cached utility mapping: \$UTILITY"
+    fi
+  fi
+
   # HUMAnN 4 functional profiling
   # When tax_profile is provided, HUMAnN skips its internal MetaPhlAn (~20min saved)
   humann \\
@@ -142,10 +184,10 @@ process profile_function {
     ${bypass_flag} \\
     ${tax_profile_flag} \\
     --output-basename ${name} \\
-    --nucleotide-database ${params.chocophlan} \\
+    --nucleotide-database \$CHOCOPHLAN \\
     --remove-column-description-output \\
-    --protein-database ${params.uniref} \\
-    --utility-database ${params.utility_mapping} \\
+    --protein-database \$UNIREF \\
+    --utility-database \$UTILITY \\
     ${metaphlan_opts} \\
     --pathways metacyc \\
     --threads ${task.cpus} \\
