@@ -265,7 +265,21 @@ workflow {
 
   // Functional profiling (HUMAnN4) if not skipped
   if ( ! params.skipHumann ) {
-    profile_function(ch_filtered_reads)
+    // When reuse_metaphlan_profile is enabled, join MetaPhlAn TSV profiles with reads
+    // so HUMAnN skips its internal MetaPhlAn run (~20min/sample savings).
+    // This creates a serial dependency: profile_taxa must complete before profile_function.
+    if (params.reuse_metaphlan_profile) {
+      ch_humann_input = ch_filtered_reads
+        .join(profile_taxa.out.metaphlan_tsv)
+        .map { meta, reads, tsv_profile -> [meta, reads, tsv_profile] }
+      log.info "HUMAnN will reuse MetaPhlAn profiles from profile_taxa (reuse_metaphlan_profile=true)"
+    } else {
+      // Default: no pre-computed profile, HUMAnN runs its own MetaPhlAn internally
+      ch_humann_input = ch_filtered_reads
+        .map { meta, reads -> [meta, reads, file('NO_TAXONOMY_PROFILE')] }
+    }
+
+    profile_function(ch_humann_input)
 
     ch_genefamilies = profile_function.out.profile_function_gf
                 .map { meta, table ->

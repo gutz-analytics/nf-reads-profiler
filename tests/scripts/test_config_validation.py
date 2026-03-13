@@ -61,11 +61,13 @@ def test_output_exists_wired():
     print("\n[1] P0: output_exists() wired into profile_function")
     main = read_file('main.nf')
 
-    # ch_filtered_reads must be used (not just defined)
+    # ch_filtered_reads must be used to build the HUMAnN input (not merged_reads directly)
+    # With reuse_metaphlan_profile support, the call is profile_function(ch_humann_input)
+    # where ch_humann_input is built from ch_filtered_reads
     check(
-        'profile_function(ch_filtered_reads)' in main,
-        "profile_function receives ch_filtered_reads (not merged_reads)",
-        "Expected: profile_function(ch_filtered_reads)"
+        'profile_function(ch_humann_input)' in main and 'ch_filtered_reads' in main,
+        "profile_function receives filtered reads via ch_humann_input (built from ch_filtered_reads)",
+        "Expected: ch_filtered_reads used to build ch_humann_input for profile_function"
     )
 
     # output_exists must check HUMAnN4 file naming convention
@@ -559,6 +561,70 @@ def test_medi_unmapped_only():
 
 
 # =============================================================================
+# TEST GROUP 20: reuse_metaphlan_profile — Skip HUMAnN's internal MetaPhlAn
+# =============================================================================
+def test_reuse_metaphlan_profile():
+    print("\n[20] Reuse MetaPhlAn profile in HUMAnN (skip duplicate MetaPhlAn)")
+    config = read_file('nextflow.config')
+    main = read_file('main.nf')
+    cc = read_file('modules/community_characterisation.nf')
+
+    # Parameter exists and defaults to false
+    check(
+        'reuse_metaphlan_profile' in config,
+        "reuse_metaphlan_profile parameter defined in nextflow.config"
+    )
+    check(
+        'reuse_metaphlan_profile = false' in config,
+        "reuse_metaphlan_profile defaults to false (safe default, no DB version assumption)"
+    )
+
+    # profile_taxa emits a TSV profile for HUMAnN
+    check(
+        'metaphlan_tsv' in cc,
+        "profile_taxa has 'metaphlan_tsv' emit channel for TSV output"
+    )
+    check(
+        'metaphlan_profile.tsv' in cc,
+        "profile_taxa produces *_metaphlan_profile.tsv file"
+    )
+
+    # profile_function accepts a taxonomy profile input
+    check(
+        'tax_profile' in cc,
+        "profile_function accepts tax_profile input"
+    )
+    check(
+        '--taxonomic-profile' in cc,
+        "profile_function uses HUMAnN --taxonomic-profile flag"
+    )
+    check(
+        'NO_TAXONOMY_PROFILE' in cc,
+        "Sentinel file NO_TAXONOMY_PROFILE used when no pre-computed profile"
+    )
+
+    # main.nf wires profile_taxa output into profile_function
+    check(
+        'profile_taxa.out.metaphlan_tsv' in main,
+        "main.nf joins profile_taxa TSV output with filtered reads for HUMAnN"
+    )
+    check(
+        'reuse_metaphlan_profile' in main,
+        "main.nf conditionally routes based on reuse_metaphlan_profile flag"
+    )
+    check(
+        'NO_TAXONOMY_PROFILE' in main,
+        "main.nf uses NO_TAXONOMY_PROFILE sentinel when flag is disabled"
+    )
+
+    # Single MetaPhlAn run: TSV + biom convert (not two separate MetaPhlAn runs)
+    check(
+        'biom convert' in cc and 'metaphlan_profile.tsv' in cc,
+        "profile_taxa converts TSV to biom (single MetaPhlAn run, not two)"
+    )
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 if __name__ == '__main__':
@@ -585,6 +651,7 @@ if __name__ == '__main__':
     test_bypass_translated_search()
     test_submit_rate_limits()
     test_medi_unmapped_only()
+    test_reuse_metaphlan_profile()
 
     print("\n" + "=" * 70)
     print(f"RESULTS: {PASS} passed, {FAIL} failed, {WARN} warnings")

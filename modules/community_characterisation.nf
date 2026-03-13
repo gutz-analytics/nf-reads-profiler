@@ -27,6 +27,7 @@ process profile_taxa {
 
   output:
   tuple val(meta), path("*_metaphlan.biom"), emit: to_profile_function_bugs
+  tuple val(meta), path("*_metaphlan_profile.tsv"), optional: true, emit: metaphlan_tsv
   // tuple val(meta), path("*_profile_taxa_mqc.yaml"), emit: profile_taxa_log
 
 
@@ -36,26 +37,50 @@ process profile_taxa {
   script:
   name = task.ext.name ?: "${meta.id}"
   run = task.ext.run ?: "${meta.run}"
+  // When reuse_metaphlan_profile is enabled, produce a TSV profile that HUMAnN can
+  // consume via --taxonomic-profile. We run MetaPhlAn once as TSV (with rel_ab_w_read_stats
+  // which HUMAnN requires) then convert to biom — avoiding a double MetaPhlAn run.
+  produce_tsv = params.reuse_metaphlan_profile ? 'true' : 'false'
   """
   echo ${params.metaphlan_db}
 
-  metaphlan \\
-    --input_type fastq \\
-    --tmp_dir . \\
-    --index ${params.metaphlan_index} \\
-    --db_dir ${params.metaphlan_db} \\
-    --bt2_ps ${params.bt2options} \\
-    --sample_id ${name} \\
-    --biom_format_output \\
-    --nproc ${task.cpus} \\
-    --no_map \\
-    --output_file ${name}_metaphlan.biom \\
-    $reads \\
-    
+  if [ "${produce_tsv}" = "true" ]; then
+    # Single MetaPhlAn run producing TSV (for HUMAnN) then convert to biom
+    metaphlan \\
+      --input_type fastq \\
+      --tmp_dir . \\
+      --index ${params.metaphlan_index} \\
+      --db_dir ${params.metaphlan_db} \\
+      --bt2_ps ${params.bt2options} \\
+      --sample_id ${name} \\
+      -t rel_ab_w_read_stats \\
+      --nproc ${task.cpus} \\
+      --no_map \\
+      --output_file ${name}_metaphlan_profile.tsv \\
+      $reads
 
-  # MultiQC doesn't have a module for Metaphlan yet. As a consequence, I
-  # had to create a YAML pathwith all the info I need via a bash script
-  # bash scrape_profile_taxa_log.sh ${name}_metaphlan_bugs_list.tsv > ${name}_profile_taxa_mqc.yaml
+    # Convert TSV to biom for downstream combine_metaphlan_tables
+    biom convert \\
+      --input-fp ${name}_metaphlan_profile.tsv \\
+      --output-fp ${name}_metaphlan.biom \\
+      --table-type 'Taxon table' \\
+      --to-hdf5 \\
+      --process-obs-metadata taxonomy
+  else
+    # Default: biom output only (no TSV needed)
+    metaphlan \\
+      --input_type fastq \\
+      --tmp_dir . \\
+      --index ${params.metaphlan_index} \\
+      --db_dir ${params.metaphlan_db} \\
+      --bt2_ps ${params.bt2options} \\
+      --sample_id ${name} \\
+      --biom_format_output \\
+      --nproc ${task.cpus} \\
+      --no_map \\
+      --output_file ${name}_metaphlan.biom \\
+      $reads
+  fi
   """
 }
 
@@ -84,7 +109,7 @@ process profile_function {
   afterScript 'rm -rf *_humann_temp* 2>/dev/null || true; rm -f *.sam *.m8 *.aln 2>/dev/null || true'
 
   input:
-  tuple val(meta), path(reads)
+  tuple val(meta), path(reads), path(tax_profile)
 
   output:
   tuple val(meta), path("*_0.log"), emit: profile_function_log_main
@@ -103,19 +128,25 @@ process profile_function {
   run = task.ext.run ?: "${meta.run}"
   bypass_flag = params.bypass_translated_search ? '--bypass-translated-search' : ''
   preserve_unaligned = params.medi_unmapped_only && params.enable_medi ? 'true' : 'false'
+  // When a pre-computed taxonomic profile is provided, HUMAnN skips its internal MetaPhlAn
+  // run entirely (~20min savings per sample). The profile must be in MetaPhlAn TSV format.
+  tax_profile_flag = (tax_profile.name != 'NO_TAXONOMY_PROFILE') ? "--taxonomic-profile ${tax_profile}" : ''
+  metaphlan_opts = (tax_profile.name != 'NO_TAXONOMY_PROFILE') ? '' : "--metaphlan-options \"-t rel_ab_w_read_stats --index ${params.humann_metaphlan_index} --bowtie2db ${params.humann_metaphlan_db} --bt2_ps ${params.bt2options}\""
   """
-  # HUMAnN 4 will run its own MetaPhlAn profiling internally
+  # HUMAnN 4 functional profiling
+  # When tax_profile is provided, HUMAnN skips its internal MetaPhlAn (~20min saved)
   humann \\
     --input $reads \\
     --output . \\
     ${params.humann_params} \\
     ${bypass_flag} \\
+    ${tax_profile_flag} \\
     --output-basename ${name} \\
     --nucleotide-database ${params.chocophlan} \\
     --remove-column-description-output \\
     --protein-database ${params.uniref} \\
     --utility-database ${params.utility_mapping} \\
-    --metaphlan-options "-t rel_ab_w_read_stats --index ${params.humann_metaphlan_index} --bowtie2db ${params.humann_metaphlan_db} --bt2_ps ${params.bt2options}" \\
+    ${metaphlan_opts} \\
     --pathways metacyc \\
     --threads ${task.cpus} \\
     --memory-use minimum

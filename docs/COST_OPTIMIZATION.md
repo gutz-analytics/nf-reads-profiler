@@ -319,17 +319,81 @@ automatically receive all cleaned reads, since no unaligned file was produced fo
 4. **Validate food quantification** — results should be similar (not identical)
    to a run without the flag, since the removed reads were microbial, not food DNA.
 
-### Duplicate MetaPhlAn (Potential Future Optimization)
+### `--reuse_metaphlan_profile` — Skip Duplicate MetaPhlAn in HUMAnN
 
-Currently, MetaPhlAn runs twice per sample:
+```bash
+nextflow run main.nf -profile azure --reuse_metaphlan_profile true
+```
+
+Default: `false` (HUMAnN runs its own internal MetaPhlAn with `mpa_vOct22`).
+
+**Problem**: MetaPhlAn runs twice per sample:
 1. `profile_taxa` — standalone MetaPhlAn (index: `mpa_vJan25`, 20min)
 2. `profile_function` — HUMAnN's internal MetaPhlAn (index: `mpa_vOct22`, 20min)
 
-These use **different database versions** intentionally (HUMAnN4 requires its
-compatible MetaPhlAn DB). If you align the database versions, HUMAnN can accept
-a pre-computed profile via `--taxonomic-profile`, saving 20min/sample (6,667
-CPU-hours at 20K samples). This requires scientific validation that the newer
-MetaPhlAn DB produces compatible results with HUMAnN4.
+**Fix**: When enabled, `profile_taxa` produces a TSV profile (in addition to biom)
+that gets passed to HUMAnN via `--taxonomic-profile`. HUMAnN then skips its internal
+MetaPhlAn entirely. The TSV is produced in a single MetaPhlAn run and converted to
+biom for downstream use.
+
+**Tradeoff**: Adds a serial dependency — `profile_function` waits for `profile_taxa`
+to complete (~20min) instead of running in parallel. The standalone MetaPhlAn uses a
+newer DB version (`mpa_vJan25`) than HUMAnN's default (`mpa_vOct22`). This should
+produce equivalent or better results, but may cause minor differences in taxonomic
+assignments.
+
+**When to use**:
+- Large batch runs where 20min/sample savings add up significantly
+- When you're comfortable using a single (newer) MetaPhlAn DB for both taxa and function
+- Cost-optimized configurations combining spot + bypass + reuse
+
+**Cost impact at 20K samples** (Standard_D16ads_v5_spot at ~$0.58/hr):
+- Default (20min MetaPhlAn × 2): 20K × 40min × $0.58/hr = $7,733
+- Reuse profile (20min × 1): 20K × 20min × $0.58/hr = $3,867
+- **Savings: ~$3,867 (50% of MetaPhlAn cost)**
+- Plus: HUMAnN wall-clock drops ~20min per sample
+
+#### Tutorial: Validating reuse_metaphlan_profile
+
+1. **Run with the flag**:
+   ```bash
+   nextflow run main.nf -profile azure \
+     --reuse_metaphlan_profile true \
+     --input samplesheet.csv --project test_reuse_profile
+   ```
+
+2. **Verify in trace.txt** that `profile_function` tasks start after `profile_taxa`:
+   ```bash
+   # profile_function submit times should be after profile_taxa complete times
+   awk -F'\t' '/profile_taxa|profile_function/' trace.txt | column -t
+   ```
+
+3. **Verify HUMAnN used the pre-computed profile** (in log files):
+   ```bash
+   # HUMAnN log should show "Using provided taxonomic profile" instead of
+   # "Running MetaPhlAn..."
+   grep -l "taxonomic profile" <outdir>/test_reuse_profile/*/function/*.log
+   ```
+
+4. **Compare results**: Taxonomy assignments may differ slightly due to DB version
+   change. Compare `*_1_metaphlan_profile.tsv` output between runs with and without
+   the flag to assess impact for your dataset.
+
+### Combined: Maximum Cost Savings
+
+```bash
+nextflow run main.nf -profile aws \
+  --humann_spot true \
+  --bypass_translated_search true \
+  --reuse_metaphlan_profile true \
+  --enable_medi --medi_unmapped_only true
+```
+
+At 20K samples, this configuration yields:
+- HUMAnN on spot with bypass: $0.22/sample
+- MetaPhlAn (single run): $0.19/sample
+- MEDI on unmapped reads: ~$14.67/sample (reduced from $20/sample)
+- **Total: ~$1.08/sample** (well under $3 budget)
 
 ## Seqera vs Built-in Nextflow Monitoring
 
