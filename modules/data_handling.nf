@@ -27,7 +27,7 @@ process FASTERQ_DUMP {
     tag "$meta.id"
     label 'process_medium'
 
-    conda "bioconda::sra-tools=3.0.8"
+    conda "bioconda::sra-tools=3.2.1 conda-forge::pigz=2.8"
     container params.docker_container_sra
 
     input:

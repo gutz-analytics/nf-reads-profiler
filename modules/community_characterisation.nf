@@ -15,6 +15,8 @@ process profile_taxa {
   tag "$name"
 
   //Enable multicontainer settings
+  // container params.docker_container_metaphlan
+  conda params.conda_metaphlan
   container params.docker_container_metaphlan
 
   publishDir "${params.outdir}/${params.project}/${run}/taxa", mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
@@ -70,6 +72,8 @@ process profile_function {
   tag "$name"
 
   //Enable multicontainer settings
+  // container params.docker_container_humann4
+  conda params.conda_humann4
   container params.docker_container_humann4
 
   publishDir {"${params.outdir}/${params.project}/${run}/function" }, mode: 'copy', pattern: "*.{tsv,log}"
@@ -117,7 +121,8 @@ process profile_function {
 process combine_humann_tables {
   tag "$run"
 
-  container params.docker_container_humann4
+  // container params.docker_container_humann4
+  conda params.conda_humann4
 
   publishDir {"${params.outdir}/${params.project}/${run}/combined_tables" }, mode: 'copy', pattern: "*.{tsv,log}"
   
@@ -162,7 +167,8 @@ process combine_humann_tables {
 process combine_metaphlan_tables {
   tag "$run"
 
-  container params.docker_container_metaphlan
+  // container params.docker_container_metaphlan
+  conda params.conda_metaphlan
 
   publishDir {"${params.outdir}/${params.project}/${run}/combined_tables" }, mode: 'copy', pattern: "*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/metaphlan" }, mode: 'copy', pattern: "*.biom"
@@ -206,7 +212,8 @@ EOF
 process combine_humann_taxonomy_tables {
   tag "$run"
 
-  container params.docker_container_metaphlan
+  // container params.docker_container_metaphlan
+  conda params.conda_metaphlan
 
   publishDir {"${params.outdir}/${params.project}/${run}/combined_tables" }, mode: 'copy', pattern: "*.tsv"
   
@@ -304,7 +311,8 @@ process split_stratified_tables {
 process regroup_genefamilies {
   tag "${run}_${type}"
 
-  container params.docker_container_humann4
+  // container params.docker_container_humann4
+  conda params.conda_humann4
 
   publishDir {"${params.outdir}/${params.project}/${run}/function/regrouped" }, mode: 'copy', pattern: "*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/regrouped" }, mode: 'copy', pattern: "*.biom"
