@@ -9,7 +9,9 @@ process get_software_versions {
 
   //Starting the biobakery container. I need to run metaphlan and Humann to get
   //their version number (due to the fact that they live in the same container)
-  container params.docker_container_multiqc
+  // container params.docker_container_multiqc
+  conda params.conda_multiqc
+  // not sure if this works with conda, may need to copy from other conda envs.
 
   //input:
   //val (some_value)
@@ -40,7 +42,8 @@ process get_software_versions {
 process count_reads {
   tag "$name"
   
-  container params.docker_container_fastp
+  // container params.docker_container_fastp
+  conda params.conda_fastp
   
   publishDir "${params.outdir}/${params.project}/${run}/readcount", mode: 'copy', pattern: "*_readcount.txt"
 
@@ -65,7 +68,8 @@ process count_reads {
 process clean_reads {
   tag "$name"
   label "fastp"
-  container params.docker_container_fastp
+  // container params.docker_container_fastp
+  conda params.conda_fastp
 
   input:
   tuple val(meta), path(reads)
@@ -122,7 +126,8 @@ process MULTIQC {
   tag "$run"
   publishDir "${params.outdir}/${params.project}/${run}/log", mode: 'copy'
 
-  container params.docker_container_multiqc
+  // container params.docker_container_multiqc
+  conda params.conda_multiqc
 
   input:
   path  metadata_files
