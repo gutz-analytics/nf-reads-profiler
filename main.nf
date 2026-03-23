@@ -268,7 +268,7 @@ workflow {
                     meta_new.put('type','genefamilies')
                     [ meta_new, table ]
                 }
-                .groupTuple()
+                .groupTuple(sort: true)
 
     ch_reactions = profile_function.out.profile_function_reactions
                 .map { meta, table ->
@@ -276,7 +276,7 @@ workflow {
                     meta_new.put('type','reactions')
                     [ meta_new, table ]
                 }
-                .groupTuple()
+                .groupTuple(sort: true)
 
     ch_pathabundance = profile_function.out.profile_function_pa
                 .map { meta, table ->
@@ -284,7 +284,7 @@ workflow {
                     meta_new.put('type','pathabundance')
                     [ meta_new, table ]
                 }
-                .groupTuple()
+                .groupTuple(sort: true)
 
     // HUMAnN-generated taxonomy profiles (separate from independent MetaPhlAn)
     ch_humann_taxonomy = profile_function.out.profile_function_metaphlan
@@ -293,7 +293,7 @@ workflow {
                     meta_new.put('type','metaphlan_profile')
                     [ meta_new, table ]
                 }
-                .groupTuple()
+                .groupTuple(sort: true)
 
     combine_humann_tables(ch_genefamilies.mix(ch_reactions, ch_pathabundance))
     
@@ -321,7 +321,7 @@ workflow {
                   def meta_new = meta - meta.subMap('id')
               [ meta_new, table ]
             }
-            .groupTuple()
+            .groupTuple(sort: true)
             
   combine_metaphlan_tables(ch_metaphlan)
 
@@ -375,7 +375,7 @@ workflow {
       .mix(ch_humann_taxonomy_for_biom)
 
     // Convert all tables to biom format
-    convert_tables_to_biom(ch_tables_for_biom)
+    // convert_tables_to_biom(ch_tables_for_biom)
     
     // Process HUMAnN tables if enabled
     if (params.process_humann_tables) {
@@ -404,7 +404,7 @@ workflow {
                   def meta_new = meta - meta.subMap('id')
               [ meta_new, table ]
             }
-            .groupTuple()
+            .groupTuple(sort: true)
   get_software_versions()
   MULTIQC (
     get_software_versions.out.software_versions_yaml,
