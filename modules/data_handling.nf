@@ -39,7 +39,6 @@ process FASTERQ_DUMP {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
     """
     # Run fasterq-dump
     fasterq-dump \\
