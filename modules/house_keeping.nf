@@ -10,8 +10,10 @@ process get_software_versions {
   //Starting the biobakery container. I need to run metaphlan and Humann to get
   //their version number (due to the fact that they live in the same container)
   // container params.docker_container_multiqc
-  conda params.conda_multiqc
-  // not sure if this works with conda, may need to copy from other conda envs.
+  // conda params.conda_multiqc
+  conda "bioconda::multiqc=1.22"
+  // Does this work with 'named' envs?
+  // We don't need it all my envs are declarative.
 
   //input:
   //val (some_value)
@@ -43,7 +45,8 @@ process count_reads {
   tag "$name"
   
   // container params.docker_container_fastp
-  conda params.conda_fastp
+  // conda params.conda_fastp
+  conda "bioconda::fastp=1.2.0"
   
   publishDir "${params.outdir}/${params.project}/${run}/readcount", mode: 'copy', pattern: "*_readcount.txt"
 
@@ -51,7 +54,7 @@ process count_reads {
   tuple val(meta), path(reads)
 
   output:
-  tuple val(meta), path(reads), env(READ_COUNT), emit: read_info
+  tuple val(meta), path(reads), env('READ_COUNT'), emit: read_info
   tuple val(meta), path("${name}_readcount.txt"), emit: read_count
   
   script:
@@ -69,7 +72,8 @@ process clean_reads {
   tag "$name"
   label "fastp"
   // container params.docker_container_fastp
-  conda params.conda_fastp
+  // conda params.conda_fastp
+  conda "bioconda::fastp=1.2.0"
 
   input:
   tuple val(meta), path(reads)
@@ -127,17 +131,17 @@ process MULTIQC {
   publishDir "${params.outdir}/${params.project}/${run}/log", mode: 'copy'
 
   // container params.docker_container_multiqc
-  conda params.conda_multiqc
+  // conda params.conda_multiqc
+  conda "bioconda::multiqc=1.22"
 
   input:
   path  metadata_files
   tuple val(meta), path(data_files)
   path(multiqc_config)
   output:
-  path "multiqc_report.html"
-  path "multiqc_data"
+  path "nf-profile-reads-Report_multiqc_report.html"
+  path "nf-profile-reads-Report_multiqc_report_data/"
 
-  
   script:
   run = task.ext.run ?: "${meta.run}"
   """
