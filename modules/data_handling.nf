@@ -29,6 +29,8 @@ process FASTERQ_DUMP {
 
     conda "bioconda::sra-tools=3.2.1 conda-forge::pigz=2.8"
     container params.docker_container_sra
+    memory 4.GB
+    cpus 2
 
     input:
     tuple val(meta), path(sra_file)
