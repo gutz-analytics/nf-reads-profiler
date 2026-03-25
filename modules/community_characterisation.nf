@@ -19,7 +19,7 @@ process profile_taxa {
   conda params.conda_metaphlan
   container params.docker_container_metaphlan
 
-  publishDir "${params.outdir}/${params.project}/${run}/taxa", mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
+  publishDir "${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/taxa", mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
 
   input:
   tuple val(meta), path(reads)
@@ -76,7 +76,7 @@ process profile_function {
   conda params.conda_humann4
   container params.docker_container_humann4
 
-  publishDir {"${params.outdir}/${params.project}/${run}/function" }, mode: 'copy', pattern: "*.{tsv,log}"
+  publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/function" }, mode: 'copy', pattern: "*.{tsv,log}"
 
   input:
   tuple val(meta), path(reads)
@@ -124,7 +124,7 @@ process combine_humann_tables {
   // container params.docker_container_humann4
   conda params.conda_humann4
 
-  publishDir {"${params.outdir}/${params.project}/${run}/combined_tables" }, mode: 'copy', pattern: "*.{tsv,log}"
+  publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/combined_tables" }, mode: 'copy', pattern: "*.{tsv,log}"
   
   input:
   tuple val(meta), path(table)
@@ -170,7 +170,7 @@ process combine_metaphlan_tables {
   // container params.docker_container_metaphlan
   conda params.conda_metaphlan
 
-  publishDir {"${params.outdir}/${params.project}/${run}/combined_tables" }, mode: 'copy', pattern: "*.biom"
+  publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/combined_tables" }, mode: 'copy', pattern: "*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/metaphlan" }, mode: 'copy', pattern: "*.biom"
   
   input:
@@ -215,7 +215,7 @@ process combine_humann_taxonomy_tables {
   // container params.docker_container_metaphlan
   conda params.conda_metaphlan
 
-  publishDir {"${params.outdir}/${params.project}/${run}/combined_tables" }, mode: 'copy', pattern: "*.tsv"
+  publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/combined_tables" }, mode: 'copy', pattern: "*.tsv"
   
   input:
   tuple val(meta), path(table)
@@ -245,7 +245,7 @@ process convert_tables_to_biom {
 
   container params.docker_container_humann4
 
-  publishDir {"${params.outdir}/${params.project}/${run}/combined_tables" }, mode: 'copy', pattern: "*.biom"
+  publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/combined_tables" }, mode: 'copy', pattern: "*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/genefamilies" }, mode: 'copy', pattern: "*_genefamilies*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/pathabundance" }, mode: 'copy', pattern: "*_pathabundance*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/reactions" }, mode: 'copy', pattern: "*_reactions*.biom"
@@ -314,7 +314,7 @@ process regroup_genefamilies {
   // container params.docker_container_humann4
   conda params.conda_humann4
 
-  publishDir {"${params.outdir}/${params.project}/${run}/function/regrouped" }, mode: 'copy', pattern: "*.biom"
+  publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/function/regrouped" }, mode: 'copy', pattern: "*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/regrouped" }, mode: 'copy', pattern: "*.biom"
 
   input:
