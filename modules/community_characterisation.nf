@@ -34,7 +34,6 @@ process profile_taxa {
 
   script:
   name = task.ext.name ?: "${meta.id}"
-  run = task.ext.run ?: "${meta.run}"
   """
   echo ${params.metaphlan_db}
 
