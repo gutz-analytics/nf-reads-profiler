@@ -374,17 +374,18 @@ workflow {
         .map { meta, file -> [meta + [stratification: 'unstratified'], file] })
       .mix(ch_humann_taxonomy_for_biom)
 
-    // Convert all tables to biom format
+    // // Convert all tables to biom format
+    // Disable for now. We can convert and group these later.
     // convert_tables_to_biom(ch_tables_for_biom)
     
-    // Process HUMAnN tables if enabled
-    if (params.process_humann_tables) {
-      // Use only the genefamilies combined tables for processing
-      ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, table -> 
-        meta.type == 'genefamilies' 
-      }
-      regroup_genefamilies(ch_combined_genefamilies)
-    }
+    // // Process HUMAnN tables if enabled
+    // if (params.process_humann_tables) {
+    //   // Use only the genefamilies combined tables for processing
+    //   ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, table ->
+    //     meta.type == 'genefamilies'
+    //   }
+    //   regroup_genefamilies(ch_combined_genefamilies)
+    // }
     
   }
 
