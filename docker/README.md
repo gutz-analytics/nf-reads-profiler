@@ -19,6 +19,7 @@ Note that the final argument is the path to the folder with the Dockerfile, not 
 
 ```sh
 docker buildx build --platform linux/arm64,linux/amd64 -t colinbrislawn/sra-tools-bash:3.2.1 --push sra-tools-bash
+docker buildx build --platform linux/arm64 -t colinbrislawn/metaphlan:4.2.4 --push metaphlan
 ```
 
 ## View images we can give to Nextlow
@@ -32,4 +33,10 @@ docker search colinbrislawn
 ```sh
 # View all local images on this machine
 docker image ls
+
+# Remove a local image
+# be specific with REPOSITORY:TAG
+docker image rm hello-world:latest
+docker image rm lightweightlabware/aws-cli-bash:ubuntu
+
 ```
