@@ -67,6 +67,8 @@ process profile_function {
   tag "$name"
   conda params.conda_humann4
   container params.docker_container_humann4
+  containerOptions '-u $(id -u):$(id -g)'
+
   memory 20.GB
   cpus 4
 
@@ -115,6 +117,7 @@ process combine_humann_tables {
   tag "$run"
   conda params.conda_humann4
   container params.docker_container_humann4
+  containerOptions '-u $(id -u):$(id -g)'
 
   publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/combined_tables" }, mode: 'copy', pattern: "*.{tsv,log}"
 
@@ -233,6 +236,7 @@ process convert_tables_to_biom {
   tag "${run}_${type}"
 
   // container params.docker_container_humann4
+  // containerOptions '-u $(id -u):$(id -g)'
   // conda params.conda_humann4
   // just biome to avoid software conflicts
   conda params.conda_biom
@@ -272,6 +276,7 @@ process split_stratified_tables {
   tag "${run}_${type}"
   conda params.conda_humann4
   container params.docker_container_humann4
+  containerOptions '-u $(id -u):$(id -g)'
 
   input:
   tuple val(meta), path(tsv_table)
@@ -304,6 +309,7 @@ process regroup_genefamilies {
   tag "${run}_${type}"
   conda params.conda_humann4
   container params.docker_container_humann4
+  containerOptions '-u $(id -u):$(id -g)'
 
   publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/function/regrouped" }, mode: 'copy', pattern: "*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/regrouped" }, mode: 'copy', pattern: "*.biom"
