@@ -101,8 +101,8 @@ aws cloudformation deploy \
 aws cloudformation describe-stacks \
   --stack-name nf-reads-profiler-batch \
   --region us-east-2 \
-  --query "Stacks[0].Outputs" \
-  --output table
+  --query "Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}" \
+  --output text
 ```
 
 Save `NextflowRunnerPolicyArn` and `BatchJobRoleArn` for the next steps.

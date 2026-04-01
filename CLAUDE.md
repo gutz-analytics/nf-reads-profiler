@@ -112,6 +112,20 @@ This is a Nextflow pipeline for metagenomic read profiling using MetaPhlAn4 and 
 nextflow run main.nf -profile test
 ```
 
+**AWS Batch dev**
+
+We just built this!
+
+```bash
+# Check to see if the AWS Batch queue is ready and the runner VM is properly configured
+aws batch describe-job-queues --job-queues spot-queue
+aws batch describe-compute-environments --compute-environments spot-compute-environment
+aws batch describe-job-definitions --job-definitions nextflow-production
+
+# Sub a job to the queue
+nextflow run main.nf -profile aws
+```
+
 **Azure Batch execution:**
 ```bash
 nextflow run main.nf -profile azure --input samplesheet.csv --project <project_name> --outdir <output_path>
