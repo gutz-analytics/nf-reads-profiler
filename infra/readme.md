@@ -105,20 +105,24 @@ aws cloudformation describe-stacks \
   --output text
 ```
 
-Save `NextflowRunnerPolicyArn` and `BatchJobRoleArn` for the next steps.
+Save for the next steps: **From March 31, 2026**
+  - `NextflowRunnerPolicyArn` = arn:aws:iam::730883236839:policy/nf-reads-profiler-nextflow-runner-policy
+  - `BatchJobRoleArn`         = arn:aws:iam::730883236839:role/nf-reads-profiler-batch-job-role
 
 ---
 
 ## Post-Deploy: Attach Runner Policy
 
+**From March 31, 2026**
+
 ```bash
 # Replace <runner-role-name> with the IAM role attached to your runner VM
 aws iam attach-role-policy \
-  --role-name <runner-role-name> \
-  --policy-arn <NextflowRunnerPolicyArn from stack outputs>
+  --role-name head-node-role \
+  --policy-arn arn:aws:iam::730883236839:policy/nf-reads-profiler-nextflow-runner-policy
 
 # Verify
-aws iam list-attached-role-policies --role-name <runner-role-name>
+aws iam list-attached-role-policies --role-name head-node-role
 ```
 
 ---
@@ -166,18 +170,9 @@ nextflow run /path/to/nf-reads-profiler/main.nf \
   --outdir s3://gutz-nf-reads-profilers-runs/results/ \
   --project my-project \
   -resume
-
-# Smoke test
-nextflow run main.nf \
-  -profile aws \
-  --input s3://gutz-nf-reads-profilers-runs/samplesheets/test.csv \
-  --outdir s3://gutz-nf-reads-profilers-runs/results-test/ \
-  --project smoke-test \
-  --nreads 1000 \
-  --minreads 100
 ```
 
-Key flags:
+Key flags: (Untested)
 - `-resume` — reuses cached work; essential for long pipelines
 - `-profile aws` — loads `conf/aws_batch.config` (spot-queue, S3 work dir)
 - No credential files needed when running on an EC2 instance with the runner policy attached
@@ -185,7 +180,7 @@ Key flags:
 ### Database paths
 
 `nextflow.config` defaults point to local paths (`/dbs/omicsdata/...`).
-Override with S3 URIs for AWS runs:
+TODO: Override with S3 URIs for AWS runs in the conf file, or CLI:
 
 ```bash
 nextflow run main.nf -profile aws \
@@ -200,9 +195,12 @@ nextflow run main.nf -profile aws \
 
 ---
 
+# Untested from here down
+
+
 ## Cost Monitoring
 
-### AWS Budgets
+### Untested: AWS Budgets
 
 Alerts fire when actual spend reaches **80%** or forecasted spend exceeds **100%**
 of the monthly threshold for resources tagged `Project=nf-reads-profiler`.
@@ -212,7 +210,7 @@ View budgets: <https://us-east-2.console.aws.amazon.com/billing/home#/budgets>
 > **Tag activation delay:** Go to <https://us-east-2.console.aws.amazon.com/billing/home#/tags>
 > and activate `Project` as a cost allocation tag. Allow 24 hours.
 
-### AWS Cost Explorer
+### Untested: AWS Cost Explorer
 
 <https://us-east-2.console.aws.amazon.com/cost-management/home#/cost-explorer>
 
@@ -231,7 +229,7 @@ aws cloudformation describe-stacks \
   --output text
 ```
 
-### CloudWatch Alarms
+### Untested: CloudWatch Alarms
 
 | Alarm | Condition | Meaning |
 |---|---|---|
@@ -240,7 +238,7 @@ aws cloudformation describe-stacks \
 
 Spot interruptions are handled by `maxRetries=3` in `aws_batch.config` and do not trigger alarms.
 
-### Live job logs
+### Untested: Live job logs
 
 ```bash
 aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
@@ -252,7 +250,7 @@ aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
 
 ---
 
-## Estimated Costs (us-east-2, Graviton, 2025 spot pricing)
+## Untested: Estimated Costs (us-east-2, Graviton, 2025 spot pricing)
 
 | Resource | Rate | Notes |
 |---|---|---|
@@ -271,7 +269,7 @@ aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
 
 ---
 
-## Teardown
+## Untested: Teardown
 
 The workdir bucket (`gutz-nf-reads-profilers-workdir`) is deleted with the stack — but CloudFormation
 requires the bucket to be **empty first**. The 30-day lifecycle rule handles most cleanup
@@ -307,7 +305,7 @@ aws s3api delete-bucket --bucket gutz-nf-reads-profilers-runs --region us-east-2
 
 ---
 
-## Importing an Existing Workdir Bucket
+## Untested: Importing an Existing Workdir Bucket
 
 If `gutz-nf-reads-profilers-workdir` already exists, import it into the stack instead of recreating it:
 
