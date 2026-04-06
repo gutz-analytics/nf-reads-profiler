@@ -20,6 +20,7 @@ Note that the final argument is the path to the folder with the Dockerfile, not 
 ```sh
 docker buildx build --platform linux/arm64,linux/amd64 -t colinbrislawn/sra-tools-bash:3.2.1 --push sra-tools-bash
 docker buildx build --platform linux/arm64 -t colinbrislawn/metaphlan:4.2.4 --push metaphlan
+docker buildx build --platform linux/arm64 -t colinbrislawn/medi:0.2.1 --push medi
 ```
 
 ## View images we can give to Nextlow
