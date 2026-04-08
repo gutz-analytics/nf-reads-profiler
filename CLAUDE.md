@@ -239,8 +239,8 @@ All processes use containerized tools from Azure Container Registry:
 
 **MEDI databases:**
 - Kraken2/Bracken database: `params.medi_db_path`
-- Foods definition file: `params.medi_foods_file`
-- Food contents mapping: `params.medi_food_contents_file`
+- Foods definition file: `params.medi_food_matches`
+- Food contents mapping: `params.medi_food_contents`
 
 ### Key Parameters
 
@@ -461,13 +461,13 @@ The MEDI (Metagenomic Estimation of Dietary Intake) workflow has been integrated
 
 **Enable MEDI workflow:**
 ```bash
-nextflow run main.nf --enable_medi --medi_db_path /path/to/db --medi_foods_file foods.csv --medi_food_contents_file contents.csv
+nextflow run main.nf --enable_medi --medi_db_path /path/to/db --medi_food_matches foods.csv --medi_food_contents contents.csv
 ```
 
 **Required Parameters:**
 - `medi_db_path`: Path to Kraken2/Bracken database
-- `medi_foods_file`: Foods definition file
-- `medi_food_contents_file`: Food contents mapping file
+- `medi_food_matches`: Foods definition file
+- `medi_food_contents`: Food contents mapping file
 
 ### Expected Output Files
 

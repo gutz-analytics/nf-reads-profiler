@@ -328,8 +328,8 @@ workflow {
   // MEDI quantification workflow
   if (params.enable_medi) {
     // Check that required MEDI parameters are set
-    if (!params.medi_db_path || !params.medi_foods_file || !params.medi_food_contents_file) {
-      error "MEDI quantification requires: medi_db_path, medi_foods_file, and medi_food_contents_file parameters"
+    if (!params.medi_db_path || !params.medi_food_matches || !params.medi_food_contents) {
+      error "MEDI quantification requires: medi_db_path, medi_food_matches, and medi_food_contents"
     }
     
     // Group raw reads (from FASTERQ_DUMP/local) by study for MEDI processing
@@ -352,8 +352,8 @@ workflow {
     // Pass all studies to MEDI subworkflow - it will process each study group
     MEDI_QUANT(
       studies_with_samples,
-      params.medi_foods_file,
-      params.medi_food_contents_file
+      params.medi_food_matches,
+      params.medi_food_contents
     )
   }
 
