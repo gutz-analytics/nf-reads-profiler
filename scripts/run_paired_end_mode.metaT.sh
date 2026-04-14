@@ -18,5 +18,4 @@ aws batch submit-job \
 "--singleEnd","false",\
 "--reads1","${FWD}",\
 "--reads2","${REV}",\
-"--rna","true",\
-"--taxonomic_profile","${TAXA_PROFILE}"
+"--rna","true"
