@@ -69,7 +69,7 @@ process profile_function {
   container params.docker_container_humann4
   containerOptions '-u $(id -u):$(id -g)'
 
-  memory 20.GB
+  memory 32.GB
   cpus 4
 
   publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/function" }, mode: 'copy', pattern: "*.{tsv,log}"
