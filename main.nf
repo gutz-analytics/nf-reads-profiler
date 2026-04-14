@@ -38,7 +38,6 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
     --bt2options          value   BowTie2 options
 
   HUMANn parameters for functional profiling:
-    --taxonomic_profile   path    s3path to precalculate metaphlan3 taxonomic profile output.
     --chocophlan          path    folder for the ChocoPhlAn database
     --uniref              path    folder for the UniRef database
     --annotation  <true|false>   whether annotation is enabled (default: false)
@@ -125,7 +124,6 @@ summary['Bowtie2 options'] = params.bt2options
 
 // ChocoPhlAn and UniRef databases
 summary['HUMAnN parameters'] = ""
-summary['Taxonomic Profile'] = params.taxonomic_profile
 summary['Chocophlan database'] = params.chocophlan
 summary['Uniref database'] = params.uniref
 
