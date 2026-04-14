@@ -67,6 +67,7 @@ process clean_reads {
   label "fastp"
   conda "bioconda::fastp=1.2.0"
   container params.docker_container_fastp
+  cpus 4
 
   input:
   tuple val(meta), path(reads)
