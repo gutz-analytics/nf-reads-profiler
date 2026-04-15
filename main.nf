@@ -30,7 +30,7 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
 
   Main options:
     --singleEnd  <true|false>   whether the layout is single-end
-    --skipHumann <true|false>   skip HUMAnN3 functional profiling and downstream steps (default: false)
+    --skipHumann <true|false>   skip HUMAnN4 functional profiling and downstream steps (default: false)
 
   Other options:
   MetaPhlAn parameters for taxa profiling:
@@ -106,7 +106,7 @@ summary['User name'] = System.getProperty("user.name") //User's account name
 
 summary['Container Engine'] = workflow.containerEngine
 if(workflow.containerEngine) summary['Container'] = workflow.container
-summary['HUMAnN'] = params.docker_container_humann3
+summary['HUMAnN'] = params.docker_container_humann4
 summary['MetaPhlAn'] = params.docker_container_metaphlan
 summary['MultiQC'] = params.docker_container_multiqc
 

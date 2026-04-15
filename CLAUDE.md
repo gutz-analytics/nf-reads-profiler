@@ -101,7 +101,7 @@ HUMAnN TSV → combine → split stratified → convert to biom → regroup_gene
 
 ## Overview
 
-This is a Nextflow pipeline for metagenomic read profiling using MetaPhlAn4 and HUMAnN3, with optional MEDI (food microbiome) quantification. The pipeline is based on the original YAMP repository but has been modified for Azure Batch execution with containerized bioinformatics tools.
+This is a Nextflow pipeline for metagenomic read profiling using MetaPhlAn4 and HUMAnN4, with optional MEDI (food microbiome) quantification. The pipeline is based on the original YAMP repository but has been modified for Azure Batch execution with containerized bioinformatics tools.
 
 ## Common Commands
 
@@ -185,8 +185,8 @@ The pipeline is organized into four main process groups:
 
 2. **Community Characterization (`modules/community_characterisation.nf`)**
    - `profile_taxa`: Taxonomic profiling using MetaPhlAn4
-   - `profile_function`: Functional profiling using HUMAnN3
-   - `combine_humann_tables`: Combines HUMAnN3 output tables
+   - `profile_function`: Functional profiling using HUMAnN4
+   - `combine_humann_tables`: Combines HUMAnN4 output tables
    - `combine_metaphlan_tables`: Combines MetaPhlAn4 output tables
 
 3. **MEDI Quantification (`subworkflows/quant.nf`)**
@@ -219,23 +219,26 @@ Input validation is handled through `assets/schema_input.json` using nf-schema p
 
 ### Container Strategy
 
-All processes use containerized tools from Azure Container Registry:
-- MetaPhlAn4: `gutzcontainers.azurecr.io/metaphlan:4.1.0`
-- HUMAnN3: `gutzcontainers.azurecr.io/humann:3.9`
-- fastp: `gutzcontainers.azurecr.io/fastp:0.23.4`
-- MultiQC: `gutzcontainers.azurecr.io/multiqc:1.11`
-- MEDI: `params.docker_container_medi` (specified in configuration)
+All processes use containerized tools (specified in configuration)
 
 ### Database Requirements
 
 **MetaPhlAn4 databases:**
+- Metaphlan db name : `params.metaphlan_index`
+- Metaphlan db path : `params.metaphlan_db`
+
+Formally:
+
 - Located at `/dbs/metagenometest/metagenome-dbs/metaphlan/metaphlan4/vJun23`
 - Index: `mpa_vJun23_CHOCOPhlAnSGB_202307`
 
-**HUMAnN3 databases:**
-- ChocoPhlAn: `/dbs/metagenometest/metagenome-dbs/humann/3.0/chocophlan/`
-- UniRef90: `/dbs/metagenometest/metagenome-dbs/humann/3.0/uniref/`
-- Utility mapping: `/dbs/metagenometest/metagenome-dbs/humann/3.0/utility_mapping/`
+
+**HUMAnN4 databases:**
+- Metaphlan db name : `params.humann_metaphlan_index`
+- Metaphlan db path : `params.humann_metaphlan_db`
+- ChocoPhlAn: `params.chocophlan`
+- UniRef90: `params.uniref`
+- Utility mapping: `params.utility_mapping`
 
 **MEDI databases:**
 - Kraken2/Bracken database: `params.medi_db_path`
@@ -269,7 +272,7 @@ outdir/
 ├── project/
 │   ├── study/
 │   │   ├── taxa/           # MetaPhlAn4 taxonomic profiles
-│   │   ├── function/       # HUMAnN3 functional profiles
+│   │   ├── function/       # HUMAnN4 functional profiles
 │   │   ├── medi/           # MEDI quantification results (if enabled)
 │   │   │   ├── kraken2/    # Kraken2 taxonomic classification
 │   │   │   ├── bracken/    # Bracken abundance estimation
@@ -293,7 +296,7 @@ The pipeline uses an `ignore` error strategy with retry logic for Azure Batch pr
 
 Azure Batch pools are auto-scaled based on workload:
 - Standard_E4s_v3: General processing
-- Standard_E8ads_v5: CPU-intensive tasks (HUMAnN3)
+- Standard_E8ads_v5: CPU-intensive tasks (HUMAnN4)
 - Standard_D8ads_v5: Memory-intensive tasks (MetaPhlAn4)
 - Standard_E32s_v3: MultiQC report generation
 
