@@ -34,12 +34,16 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
 
   Other options:
   MetaPhlAn parameters for taxa profiling:
-    --metaphlan_db path   folder for the MetaPhlAn database
-    --bt2options          value   BowTie2 options
+    --direct_metaphlan_db path   folder for the MetaPhlAn database
+    --direct_bt2options   value   BowTie2 options (direct MetaPhlAn)
 
   HUMANn parameters for functional profiling:
-    --chocophlan          path    folder for the ChocoPhlAn database
-    --uniref              path    folder for the UniRef database
+    --humann_chocophlan   path    folder for the ChocoPhlAn database
+    --humann_uniref       path    folder for the UniRef database
+    --humann_utilitymap   path    folder for the HUMAnN utility mapping database
+    --humann_bt2options   value   BowTie2 options (internal MetaPhlAn)
+
+  Pipeline summary
     --annotation  <true|false>   whether annotation is enabled (default: false)
 
 nf-reads-profiler supports FASTQ and compressed FASTQ files.
@@ -119,13 +123,14 @@ summary['Merge Reads'] = params.mergeReads
 
 //BowTie2 databases for metaphlan
 summary['MetaPhlAn parameters'] = ""
-summary['MetaPhlAn database'] = params.metaphlan_db
-summary['Bowtie2 options'] = params.bt2options
+summary['MetaPhlAn database'] = params.direct_metaphlan_db
+summary['Bowtie2 options (direct)'] = params.direct_bt2options
+summary['Bowtie2 options (humann)'] = params.humann_bt2options
 
 // ChocoPhlAn and UniRef databases
 summary['HUMAnN parameters'] = ""
-summary['Chocophlan database'] = params.chocophlan
-summary['Uniref database'] = params.uniref
+summary['Chocophlan database'] = params.humann_chocophlan
+summary['Uniref database'] = params.humann_uniref
 
 //Folders
 summary['Folders'] = ""
@@ -358,8 +363,6 @@ workflow {
   // Split stratified tables for biom files
   if (!params.skipHumann && params.annotation) {
 
-    
-
     // Split output tsv into stratified and unstratified 
 
     // Split raw output tables into stratified and unstratified
@@ -377,7 +380,7 @@ workflow {
     // convert_tables_to_biom(ch_tables_for_biom)
     
     // // Process HUMAnN tables if enabled
-    // if (params.process_humann_tables) {
+    // if (params.humann_regroup) {
     //   // Use only the genefamilies combined tables for processing
     //   ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, table ->
     //     meta.type == 'genefamilies'
