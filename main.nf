@@ -118,7 +118,6 @@ summary['MultiQC'] = params.docker_container_multiqc
 summary['Running parameters'] = ""
 summary['Sample Sheet'] = params.input
 summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
-summary['Data Type'] = params.rna ? 'Metatranscriptomic' : 'Metagenomic'
 summary['Merge Reads'] = params.mergeReads
 
 //BowTie2 databases for metaphlan

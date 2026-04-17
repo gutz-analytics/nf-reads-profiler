@@ -27,9 +27,6 @@ process profile_taxa {
   // tuple val(meta), path("*_profile_taxa_mqc.yaml"), emit: profile_taxa_log
 
 
-  when:
-  !params.rna
-
   script:
   name = task.ext.name ?: "${meta.id}"
   """
