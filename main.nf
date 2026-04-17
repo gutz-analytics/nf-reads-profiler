@@ -44,7 +44,7 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
     --humann_bt2options   value   BowTie2 options (internal MetaPhlAn)
 
   Pipeline summary
-    --annotation  <true|false>   whether annotation is enabled (default: false)
+    --skipHumann  <true|false>   whether to skip HUMAnN4 functional profiling (default: false)
 
 nf-reads-profiler supports FASTQ and compressed FASTQ files.
 """
@@ -360,7 +360,7 @@ workflow {
   }
 
   // Split stratified tables for biom files
-  if (!params.skipHumann && params.annotation) {
+  if (!params.skipHumann) {
 
     // Split output tsv into stratified and unstratified 
 
