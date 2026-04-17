@@ -184,12 +184,12 @@ TODO: Override with S3 URIs for AWS runs in the conf file, or CLI:
 
 ```bash
 nextflow run main.nf -profile aws \
-  --metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vJan25 \
-  --metaphlan_index mpa_vJan25_CHOCOPhlAnSGB_202503 \
+  --direct_metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vJan25 \
+  --direct_metaphlan_id mpa_vJan25_CHOCOPhlAnSGB_202503 \
   --humann_metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vOct22_202403 \
-  --chocophlan s3://your-db-bucket/humann/4.0/chocophlan \
-  --uniref s3://your-db-bucket/humann/4.0/uniref/uniref \
-  --utility_mapping s3://your-db-bucket/humann/4.0/utility_mapping/utility_mapping \
+  --humann_chocophlan s3://your-db-bucket/humann/4.0/chocophlan \
+  --humann_uniref s3://your-db-bucket/humann/4.0/uniref/uniref \
+  --humann_utilitymap s3://your-db-bucket/humann/4.0/utility_mapping/utility_mapping \
   ...
 ```
 

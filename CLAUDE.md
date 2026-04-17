@@ -224,8 +224,8 @@ All processes use containerized tools (specified in configuration)
 ### Database Requirements
 
 **MetaPhlAn4 databases:**
-- Metaphlan db name : `params.metaphlan_index`
-- Metaphlan db path : `params.metaphlan_db`
+- Metaphlan db name : `params.direct_metaphlan_id`
+- Metaphlan db path : `params.direct_metaphlan_db`
 
 Formally:
 
@@ -234,11 +234,11 @@ Formally:
 
 
 **HUMAnN4 databases:**
-- Metaphlan db name : `params.humann_metaphlan_index`
+- Metaphlan db name : `params.humann_metaphlan_id`
 - Metaphlan db path : `params.humann_metaphlan_db`
-- ChocoPhlAn: `params.chocophlan`
-- UniRef90: `params.uniref`
-- Utility mapping: `params.utility_mapping`
+- ChocoPhlAn: `params.humann_chocophlan`
+- UniRef90: `params.humann_uniref`
+- Utility mapping: `params.humann_utilitymap`
 
 **MEDI databases:**
 - Kraken2/Bracken database: `params.medi_db_path`
@@ -343,7 +343,7 @@ The multithreading functionality is now integrated into the Nextflow workflow:
 
 - **process_humann_tables**: Uses 64 threads (Azure Batch) or 1 thread (test profile)
 - **split_stratified_tables**: Uses 64 threads (Azure Batch) or 1 thread (test profile)
-- **Configurable split size**: `params.split_size` parameter controls memory management
+- **Configurable split size**: `params.humann_split_size` parameter controls memory management
 - **Automatic thread inheritance**: Uses `${task.cpus}` to match allocated resources
 
 ### Technical Implementation
