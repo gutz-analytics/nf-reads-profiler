@@ -32,12 +32,17 @@ Although the databases have been stored at the appropriate `/mnt/efs/databases` 
 
 ### Metaphlan4 - [latest](http://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/mpa_latest) database
 
-33433 MB at 20 MB/sec takes about 30 minutes
+In April 2026, that was `mpa_vJan25_CHOCOPhlAnSGB_202503`
+
+33433 MB at 20 MB/sec takes about 30 minutes for the bt2l index files.
+Then another 30 minutes for everything else and to decompress it.
+**~1 h total**.
 
 How long does it take to copy from S3, I wonder?
 
-```{bash}
+```sh
 mkdir -p /home/ubuntu/disk_dbs/metaphlan_databases/vJan25
+
 docker run --rm \
   -v /home/ubuntu/disk_dbs/metaphlan_databases/vJan25:/databases \
   colinbrislawn/metaphlan:4.2.4 \
@@ -45,6 +50,9 @@ docker run --rm \
     --nproc 4 \
     --db_dir /databases \
     --index mpa_vJan25_CHOCOPhlAnSGB_202503
+# includes the .bt2l files for bowtie2 and the
+# .nwk, .pkl, _VINFO.csv, and _VSG.fna files.
+ls -alh /home/ubuntu/disk_dbs/metaphlan_databases/vJan25/
 ```
 
 ### Humann4
@@ -55,7 +63,9 @@ TODO: benchmark this against copying from Mountpoint S3.
 
 #### Chocophlan
 
-```{bash}
+```sh
+echo "Untested"
+
 mkdir -p /home/ubuntu/disk_dbs/chocophlan_v4_alpha
 docker run --rm \
   -v /home/ubuntu/disk_dbs/chocophlan_v4_alpha:/databases \
@@ -66,7 +76,9 @@ docker run --rm \
 
 #### Uniref
 
-```{bash}
+```sh
+echo "Untested"
+
 mkdir -p /home/ubuntu/disk_dbs/uniref90_annotated_v4_alpha_ec_filtered
 docker run --rm \
   -v /home/ubuntu/disk_dbs/uniref90_annotated_v4_alpha_ec_filtered:/databases \
@@ -77,7 +89,9 @@ docker run --rm \
 
 #### Utility Mapping Databases
 
-```{bash}
+```sh
+echo "Untested"
+
 mkdir -p /home/ubuntu/disk_dbs/full_mapping_v4_alpha
 docker run --rm \
   -v /home/ubuntu/disk_dbs/full_mapping_v4_alpha:/databases \

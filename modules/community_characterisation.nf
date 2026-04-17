@@ -14,7 +14,7 @@ process profile_taxa {
   tag "$name"
   conda params.conda_metaphlan
   container params.docker_container_metaphlan
-  memory 30.GB
+  memory 38.GB
   cpus 4
 
   publishDir "${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/taxa", mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
