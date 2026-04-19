@@ -231,12 +231,8 @@ process combine_humann_taxonomy_tables {
 
 process convert_tables_to_biom {
   tag "${run}_${type}"
-  conda params.conda_biom
-  // try full humann4
   container params.docker_container_humann4
   containerOptions '-u $(id -u):$(id -g)'
-  // conda params.conda_humann4
-  // just biome to avoid software conflicts
 
   publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/combined_tables" }, mode: 'copy', pattern: "*.biom"
   publishDir {"${params.outdir}/${params.project}/combined_bioms/genefamilies" }, mode: 'copy', pattern: "*_genefamilies*.biom"
