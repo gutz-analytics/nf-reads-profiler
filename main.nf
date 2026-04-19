@@ -1,7 +1,5 @@
 #!/usr/bin/env nextflow
 
-nextflow.enable.dsl=2
-
 include { profile_taxa; profile_function; combine_humann_tables; combine_metaphlan_tables; combine_humann_taxonomy_tables; convert_tables_to_biom; split_stratified_tables; regroup_genefamilies } from './modules/community_characterisation'
 include { MULTIQC; get_software_versions; clean_reads; count_reads} from './modules/house_keeping'
 include { AWS_DOWNLOAD; FASTERQ_DUMP  } from './modules/data_handling'
@@ -34,121 +32,21 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
 
   Other options:
   MetaPhlAn parameters for taxa profiling:
-    --direct_metaphlan_db path   folder for the MetaPhlAn database
+    --direct_metaphlan_id name    Name/ID of the MetaPhlAn database, e.g. "mpa_vJan25_CHOCOPhlAnSGB_202503"
+    --direct_metaphlan_db path    folder for the MetaPhlAn database
     --direct_bt2options   value   BowTie2 options (direct MetaPhlAn)
 
   HUMANn parameters for functional profiling:
+    --humann_metaphlan_id name    Name/ID of the MetaPhlAn database, e.g. "mpa_vOct22_CHOCOPhlAnSGB_202403"
+    --humann_metaphlan_db path    folder for the MetaPhlAn database
     --humann_chocophlan   path    folder for the ChocoPhlAn database
     --humann_uniref       path    folder for the UniRef database
     --humann_utilitymap   path    folder for the HUMAnN utility mapping database
     --humann_bt2options   value   BowTie2 options (internal MetaPhlAn)
 
-  Pipeline summary
-    --skipHumann  <true|false>   whether to skip HUMAnN4 functional profiling (default: false)
-
 nf-reads-profiler supports FASTQ and compressed FASTQ files.
 """
 }
-
-/**
-Prints version when asked for
-*/
-if (params.version) {
-  versionMessage()
-  exit 0
-}
-
-/**
-Prints help when asked for
-*/
-
-if (params.help) {
-  helpMessage()
-  exit 0
-}
-
-// Ensure skipHumann is a boolean
-params.skipHumann = params.skipHumann ? params.skipHumann.toString().toBoolean() : false
-
-//Creates working dir
-workingpath = params.outdir + "/" + params.project
-workingdir = file(workingpath)
-if( !workingdir.exists() ) {
-  if( !workingdir.mkdirs() )  {
-    exit 1, "Cannot create working directory: $workingpath"
-  }
-}
-
-
-// Header log info
-log.info """---------------------------------------------
-nf-reads-profiler
----------------------------------------------
-
-Analysis introspection:
-
-"""
-
-def summary = [:]
-
-summary['Starting time'] = new java.util.Date()
-//Environment
-summary['Environment'] = ""
-summary['Pipeline Name'] = 'nf-reads-profiler'
-summary['Pipeline Version'] = workflow.manifest.version
-
-summary['Config Profile'] = workflow.profile
-summary['Resumed'] = workflow.resume
-
-summary['Nextflow version'] = nextflow.version.toString() + " build " + nextflow.build.toString() + " (" + nextflow.timestamp + ")"
-
-summary['Java version'] = System.getProperty("java.version")
-summary['Java Virtual Machine'] = System.getProperty("java.vm.name") + "(" + System.getProperty("java.vm.version") + ")"
-
-summary['Operating system'] = System.getProperty("os.name") + " " + System.getProperty("os.arch") + " v" +  System.getProperty("os.version")
-summary['User name'] = System.getProperty("user.name") //User's account name
-
-summary['Container Engine'] = workflow.containerEngine
-if(workflow.containerEngine) summary['Container'] = workflow.container
-summary['HUMAnN'] = params.docker_container_humann4
-summary['MetaPhlAn'] = params.docker_container_metaphlan
-summary['MultiQC'] = params.docker_container_multiqc
-
-//General
-summary['Running parameters'] = ""
-summary['Sample Sheet'] = params.input
-summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
-summary['Merge Reads'] = params.mergeReads
-
-//BowTie2 databases for metaphlan
-summary['MetaPhlAn parameters'] = ""
-summary['MetaPhlAn database'] = params.direct_metaphlan_db
-summary['Bowtie2 options (direct)'] = params.direct_bt2options
-summary['Bowtie2 options (humann)'] = params.humann_bt2options
-
-// ChocoPhlAn and UniRef databases
-summary['HUMAnN parameters'] = ""
-summary['Chocophlan database'] = params.humann_chocophlan
-summary['Uniref database'] = params.humann_uniref
-
-//Folders
-summary['Folders'] = ""
-summary['Output dir'] = workingpath
-summary['Working dir'] = workflow.workDir
-summary['Output dir'] = params.outdir
-summary['Script dir'] = workflow.projectDir
-summary['Lunching dir'] = workflow.launchDir
-
-log.info summary.collect { k,v -> "${k.padRight(27)}: $v" }.join("\n")
-log.info ""
-
-
-/**
-  Prepare workflow introspection
-
-  This process adds the workflow introspection (also printed at runtime) in the logs
-  This is NF-CORE code.
-*/
 
 def create_workflow_summary(summary) {
     def yaml_file = workDir.resolve("workflow_summary_mqc.yaml")
@@ -167,29 +65,109 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
    return yaml_file
 }
 
-
 def output_exists(meta) {
-  run = meta.run
-  name = meta.id
-  pathcoverage_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
-  genefamilies_file = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
-  pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
+  def run = meta.run
+  def name = meta.id
+  def pathcoverage_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
+  def genefamilies_file = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
+  def pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
   return pathcoverage_file.exists() && genefamilies_file.exists() && pathabundance_file.exists()
 }
 
 
 workflow {
+
+  // Handle --version and --help
+  if (params.version) {
+    versionMessage()
+    exit 0
+  }
+  if (params.help) {
+    helpMessage()
+    exit 0
+  }
+
+  //Creates working dir
+  def workingpath = params.outdir + "/" + params.project
+  def workingdir = file(workingpath)
+  if( !workingdir.exists() ) {
+    if( !workingdir.mkdirs() )  {
+      exit 1, "Cannot create working directory: $workingpath"
+    }
+  }
+
+  // Header log info
+  log.info """---------------------------------------------
+nf-reads-profiler
+---------------------------------------------
+
+Analysis introspection:
+
+"""
+
+  def summary = [:]
+
+  summary['Starting time'] = new java.util.Date()
+  //Environment
+  summary['Environment'] = ""
+  summary['Pipeline Name'] = 'nf-reads-profiler'
+  summary['Pipeline Version'] = workflow.manifest.version
+
+  summary['Config Profile'] = workflow.profile
+  summary['Resumed'] = workflow.resume
+
+  summary['Nextflow version'] = nextflow.version.toString() + " build " + nextflow.build.toString() + " (" + nextflow.timestamp + ")"
+
+  summary['Java version'] = System.getProperty("java.version")
+  summary['Java Virtual Machine'] = System.getProperty("java.vm.name") + "(" + System.getProperty("java.vm.version") + ")"
+
+  summary['Operating system'] = System.getProperty("os.name") + " " + System.getProperty("os.arch") + " v" +  System.getProperty("os.version")
+  summary['User name'] = System.getProperty("user.name") //User's account name
+
+  summary['Container Engine'] = workflow.containerEngine
+  if(workflow.containerEngine) summary['Container'] = workflow.container
+  summary['HUMAnN'] = params.docker_container_humann4
+  summary['MetaPhlAn'] = params.docker_container_metaphlan
+  summary['MultiQC'] = params.docker_container_multiqc
+
+  //General
+  summary['Running parameters'] = ""
+  summary['Sample Sheet'] = params.input
+  summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
+  summary['Merge Reads'] = params.mergeReads
+
+  //BowTie2 databases for metaphlan
+  summary['MetaPhlAn parameters'] = ""
+  summary['MetaPhlAn database'] = params.direct_metaphlan_db
+  summary['Bowtie2 options (direct)'] = params.direct_bt2options
+  summary['Bowtie2 options (humann)'] = params.humann_bt2options
+
+  // ChocoPhlAn and UniRef databases
+  summary['HUMAnN parameters'] = ""
+  summary['Chocophlan database'] = params.humann_chocophlan
+  summary['Uniref database'] = params.humann_uniref
+
+  //Folders
+  summary['Folders'] = ""
+  summary['Output dir'] = workingpath
+  summary['Working dir'] = workflow.workDir
+  summary['Output dir'] = params.outdir
+  summary['Script dir'] = workflow.projectDir
+  summary['Lunching dir'] = workflow.launchDir
+
+  log.info summary.collect { k,v -> "${k.padRight(27)}: $v" }.join("\n")
+  log.info ""
   // Parse input samplesheet using nf-validation plugin
-  Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
-      .branch {
-          local: it[1]                                    // Has fastq_1 defined
-          sra: !it[1] && it[3] =~ /^[ESD]RR[0-9]+$/     // No local files but has SRA accession
+  channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+      .branch { row ->
+          local: row[1]                                    // Has fastq_1 defined
+          sra: !row[1] && row[3] =~ /^[ESD]RR[0-9]+$/     // No local files but has SRA accession
       }
       .set { input_ch }
 
   // Process local files
   input_ch.local
-      .map { meta, fastq_1, fastq_2, sra_id -> 
+      .map { meta, fastq_1, fastq_2, _sra_id ->
           meta.single_end = !fastq_2  // true if fastq_2 is empty/null
           fastq_2 ? [ meta, [ fastq_1, fastq_2 ] ] : [ meta, [ fastq_1 ] ]
       }
@@ -197,17 +175,16 @@ workflow {
 
   // Process SRA files - only for samples without local files
   input_ch.sra
-      .map { meta, fastq_1, fastq_2, sra_id ->
+      .map { meta, _fastq_1, _fastq_2, sra_id ->
           [ meta, sra_id ]
       }
       .set { sra_ids }
 
   AWS_DOWNLOAD(sra_ids)
 
-  def sortReads = { reads -> 
-      reads.sort() 
-  }
-
+  // def sortReads = { reads ->
+  //     reads.sort()
+  // }
   // FASTERQ_DUMP(AWS_DOWNLOAD.out.sra_file)
   //     .reads
   //     .map { meta, reads -> 
@@ -227,7 +204,7 @@ workflow {
     .set { sra_reads }
 
   // Merge all read channels
-  reads_ch = Channel.empty()
+  reads_ch = channel.empty()
       .mix(local_reads)
       .mix(sra_reads)
 
@@ -236,20 +213,20 @@ workflow {
     
     // Split into passing and failing samples based on read count
     count_reads.out.read_info
-        .branch {
-            pass: it[2].toInteger() >= params.minreads
+        .branch { row ->
+            pass: row[2].toInteger() >= params.minreads
             fail: true
         }
         .set { read_check }
     
     // Log filtered samples
     read_check.fail
-        .map { meta, reads, count -> 
+        .map { meta, _reads, count ->
             log.info "Skipping sample ${meta.id} due to insufficient reads: ${count} < ${params.minreads}"
         }
 
     // Process passing samples
-    clean_reads(read_check.pass.map { meta, reads, count -> [meta, reads] })
+    clean_reads(read_check.pass.map { meta, reads, _count -> [meta, reads] })
 
   merged_reads = clean_reads.out.reads_cleaned
 
@@ -337,7 +314,7 @@ workflow {
     // Group raw reads (from FASTERQ_DUMP/local) by study for MEDI processing
     // The MEDI subworkflow will handle fastp preprocessing internally
     read_check.pass
-      .map{meta, reads, count -> 
+      .map{meta, reads, _count ->
         // Create grouping metadata with study information
         def group_meta = meta.subMap('run')  // Extract study grouping key
         [group_meta, meta, reads]  // Use raw reads, not cleaned
@@ -366,16 +343,17 @@ workflow {
 
     // Split raw output tables into stratified and unstratified
     split_stratified_tables(ch_tables_for_splitting)
-    
-    // Make channel for biom conversion - combine both stratified and unstratified outputs
-    ch_tables_for_biom = split_stratified_tables.out.stratified_tables
-      .map { meta, file -> [meta + [stratification: 'stratified'], file] }
-      .mix(split_stratified_tables.out.unstratified_tables
-        .map { meta, file -> [meta + [stratification: 'unstratified'], file] })
-      .mix(ch_humann_taxonomy_for_biom)
+
+    // Disable biom convert for now. We will just to do the 'map' and we can 'reduce' later!
+
+    // // Make channel for biom conversion - combine both stratified and unstratified outputs
+    // ch_tables_for_biom = split_stratified_tables.out.stratified_tables
+    //   .map { meta, file -> [meta + [stratification: 'stratified'], file] }
+    //   .mix(split_stratified_tables.out.unstratified_tables
+    //     .map { meta, file -> [meta + [stratification: 'unstratified'], file] })
+    //   .mix(ch_humann_taxonomy_for_biom)
 
     // // Convert all tables to biom format
-    // Disable for now. We can convert and group these later.
     // convert_tables_to_biom(ch_tables_for_biom)
     
     // // Process HUMAnN tables if enabled
@@ -390,7 +368,7 @@ workflow {
   }
 
   // MultiQC setup
-  ch_multiqc_files = Channel.empty()
+  ch_multiqc_files = channel.empty()
   ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log.ifEmpty([]))
   // ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
   if ( ! params.skipHumann ) {
@@ -398,7 +376,7 @@ workflow {
   }
   
 
-  ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
+  ch_multiqc_config = channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
 
   ch_multiqc_runs = ch_multiqc_files.map {
               meta, table ->

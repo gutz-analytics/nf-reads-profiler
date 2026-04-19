@@ -41,12 +41,12 @@ workflow MEDI_QUANT {
         food_contents_file_path  // String path to food contents file on mounted filesystem
         
     main:
-        Channel
+        channel
             .fromList(["D", "G", "S"])
             .set{levels}
 
         // Flatten studies back to individual samples for processing
-        reads = studies_with_samples.flatMap{study_id, samples -> 
+        reads = studies_with_samples.flatMap{_study_id, samples ->
             samples.collect{meta, reads -> [meta, reads]}
         }
 
@@ -58,7 +58,7 @@ workflow MEDI_QUANT {
 
         // Process each sample individually - no batching needed with ramdisk
         kraken_input = preprocess.out
-            .map{meta, reads_files, json, html -> [meta, reads_files]}  // Extract meta and processed reads
+            .map{meta, reads_files, _json, _html -> [meta, reads_files]}  // Extract meta and processed reads
 
         // Debug: Show individual samples going to Kraken2
         // kraken_input.view { meta, reads_files -> "MEDI Kraken2 input: Study=${meta.run}, Sample=${meta.id}, Files=${reads_files}" }
@@ -67,7 +67,7 @@ workflow MEDI_QUANT {
         kraken(kraken_input)
 
         // Extract k2 files from kraken output (metadata preserved)
-        kraken_k2_channel = kraken.out.map { meta, k2_file, tsv_file -> [meta, k2_file] }
+        kraken_k2_channel = kraken.out.map { meta, k2_file, _tsv_file -> [meta, k2_file] }
 
         // Debug: Show individual k2 files with preserved metadata
         // kraken_k2_channel.view { meta, k2_file -> "K2 File: Study=${meta.run}, Sample=${meta.id}, File=${k2_file.name}" }
@@ -95,7 +95,7 @@ workflow MEDI_QUANT {
         if (params.mapping ?: false) {
             // Get individual mappings
             summarize_mappings(architeuthis_filter.out)
-            summarize_mappings.out.map{meta, file -> file}.collect() | merge_mappings
+            summarize_mappings.out.map{_meta, file -> file}.collect() | merge_mappings
         }
 
         // Add taxon lineages
@@ -121,11 +121,11 @@ workflow MEDI_QUANT {
         multiqc(kraken_reports_by_study)
         
     emit:
-        food_abundance = quantify.out.map{it[1]}
-        food_content = quantify.out.map{it[2]}
+        food_abundance = quantify.out.map{row -> row[1]}
+        food_content = quantify.out.map{row -> row[2]}
         taxonomy_counts = add_lineage.out
         qc_report = multiqc.out
-        mappings = params.mapping ? merge_mappings.out : Channel.empty()
+        mappings = params.mapping ? merge_mappings.out : channel.empty()
 }
 
 /* Process definitions */
@@ -148,6 +148,7 @@ process preprocess {
 
     script:
     name = task.ext.name ?: "${meta.id}"
+    // TODO: run is never called?
     run = task.ext.run ?: "${meta.run}"
     if (meta.single_end)
         """
