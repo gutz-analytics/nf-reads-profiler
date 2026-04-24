@@ -77,6 +77,17 @@ Parameters:
     AllowedValues: [production, staging, development]
     Description: Value for Environment tag applied to all resources
 
+  EcsAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: >
+      ECS-optimized AMI for Batch workers. Must be Amazon Linux 2023 ARM64
+      (Graviton). AL2 is avoided because its glibc 2.26 is too old for modern
+      Miniconda (needs >=2.28). Look up the current AMI with:
+        aws ec2 describe-images --region us-east-2 --owners amazon \
+          --filters "Name=name,Values=al2023-ami-ecs-hvm-*-kernel-*-arm64" \
+                    "Name=state,Values=available" \
+          --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' --output text
+
 # ---------------------------------------------------------------------------
 # S3
 # ---------------------------------------------------------------------------
@@ -88,7 +99,7 @@ Resources:
   # and ensuring the bucket is nearly empty by teardown time.
   S3WorkDirBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Delete
+    DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Ref WorkDirBucketName
@@ -166,6 +177,9 @@ Resources:
                   - !Sub "${S3WorkDirBucket.Arn}/*"
                   - !Sub "arn:aws:s3:::${RunsBucketName}"
                   - !Sub "arn:aws:s3:::${RunsBucketName}/*"
+                  # Database bucket
+                  - "arn:aws:s3:::cjb-gutz-s3-demo"
+                  - "arn:aws:s3:::cjb-gutz-s3-demo/*"
       Tags:
         - Key: Project
           Value: !Ref ProjectTag
@@ -292,6 +306,38 @@ Resources:
             Condition:
               StringEquals:
                 iam:PassedToService: ecs-tasks.amazonaws.com
+          - Sid: PassLambdaRole
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt BatchMetricsLambdaRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: lambda.amazonaws.com
+          - Sid: LambdaDeploy
+            Effect: Allow
+            Action:
+              - lambda:CreateFunction
+              - lambda:GetFunction
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
+              - lambda:DeleteFunction
+              - lambda:AddPermission
+              - lambda:RemovePermission
+              - lambda:GetPolicy
+              - lambda:ListTags
+              - lambda:TagResource
+              - lambda:UntagResource
+            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectTag}-*"
+          - Sid: EventBridgeDeploy
+            Effect: Allow
+            Action:
+              - events:PutRule
+              - events:DescribeRule
+              - events:DeleteRule
+              - events:PutTargets
+              - events:RemoveTargets
+              - events:ListTargetsByRule
+            Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${ProjectTag}-*"
 
 # ---------------------------------------------------------------------------
 # Networking
@@ -316,12 +362,85 @@ Resources:
           Value: !Ref EnvironmentTag
 
 # ---------------------------------------------------------------------------
+# Launch Template — installs AWS CLI via Miniconda on every worker node at boot
+# ---------------------------------------------------------------------------
+# Nextflow mounts the GRANDPARENT directory of aws.batch.cliPath from the host
+# into each Batch container at the same path. For cliPath '/opt/conda-aws/bin/aws'
+# that means /opt/conda-aws/ is bind-mounted in. The install therefore needs to
+# be fully self-contained under that directory (binary + Python interpreter +
+# site-packages + shared libs), which is exactly what a Miniconda install gives.
+#
+# /opt/conda-aws was chosen because it does not exist in any of the pipeline's
+# container images (multiqc, humann, metaphlan, fastp, sra-tools). Mounting a
+# host dir with the same path as a container dir *shadows* the container's
+# version — see the Seqera docs warning — so we pick a path that is guaranteed
+# not to collide.
+
+  BatchWorkerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${ProjectTag}-worker"
+      LaunchTemplateData:
+        ImageId: !Ref EcsAmiId
+        # 500 GB gp3 root volume. AL2023 ECS-optimized defaults to 30 GB, which
+        # is exhausted by fasterq-dump scratch + pigz output on medium SRA runs.
+        # Volume is deleted on instance termination; cost is ~$0.055/hr while
+        # a worker is running, $0 once the fleet scales to zero.
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 500
+              VolumeType: gp3
+              DeleteOnTermination: true
+              Encrypted: true
+        UserData:
+          Fn::Base64: |
+            MIME-Version: 1.0
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
+
+            #!/bin/bash
+            # Log everything to /var/log/nf-userdata.log for SSH-based debugging.
+            exec > >(tee -a /var/log/nf-userdata.log) 2>&1
+            set -x
+            echo "=== nf-reads-profiler user data starting at $(date) ==="
+
+            ARCH=$(uname -m)
+            if [ "$ARCH" = "aarch64" ]; then
+              URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
+            else
+              URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+            fi
+
+            curl -fsSL "$URL" -o /tmp/miniconda.sh
+            bash /tmp/miniconda.sh -b -f -p /opt/conda-aws
+            rm /tmp/miniconda.sh
+            /opt/conda-aws/bin/conda install -c conda-forge --override-channels -y awscli
+            /opt/conda-aws/bin/aws --version
+
+            # stage dbs locally
+            mkdir -p /mnt/dbs
+          
+            # Sync everything EXCEPT referencedata (MEDI)
+            /opt/conda-aws/bin/aws s3 sync s3://cjb-gutz-s3-demo /mnt/dbs/ \
+                --exclude "referencedata/*" --quiet
+          
+            # Restart ECS so the agent sees the populated directory before accepting tasks
+            systemctl restart ecs
+
+            echo "=== nf-reads-profiler user data done at $(date) ==="
+
+            --==BOUNDARY==--
+
+# ---------------------------------------------------------------------------
 # Compute Environments — Graviton (ARM64) only
 # ---------------------------------------------------------------------------
 # All containers in this pipeline publish multi-arch images (linux/arm64 + amd64).
 # Graviton instances provide 20-40% better price/performance than x86 equivalents.
 # AWS Batch automatically selects the ARM64 ECS-optimized AMI when ARM instance
-# types are specified — no launch template or AMI parameter needed.
+# types are specified.
 #
 # Resource fits against aws_batch.config limits (cpus: 8, memory: 64 GB):
 #   r8g.2xlarge  = 8 vCPU / 64 GB  ← HUMAnN (memory-bound), exact fit
@@ -335,10 +454,8 @@ Resources:
   SpotComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
-      ComputeEnvironmentName: !Sub "${ProjectTag}-spot"
       Type: MANAGED
       State: ENABLED
-      ServiceRole: !GetAtt BatchServiceRole.Arn
       ComputeResources:
         Type: SPOT
         AllocationStrategy: SPOT_CAPACITY_OPTIMIZED
@@ -364,6 +481,9 @@ Resources:
           # Graviton 2 — older but widely available, lowest spot prices
           - r6g.2xlarge    # 8 vCPU / 64 GB
           - m6g.2xlarge    # 8 vCPU / 32 GB
+        LaunchTemplate:
+          LaunchTemplateId: !Ref BatchWorkerLaunchTemplate
+          Version: $Latest
         Subnets: !Ref SubnetIds
         SecurityGroupIds:
           - !Ref BatchComputeSG
@@ -379,10 +499,8 @@ Resources:
   OnDemandComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
-      ComputeEnvironmentName: !Sub "${ProjectTag}-ondemand"
       Type: MANAGED
       State: ENABLED
-      ServiceRole: !GetAtt BatchServiceRole.Arn
       ComputeResources:
         Type: EC2
         AllocationStrategy: BEST_FIT_PROGRESSIVE
@@ -395,6 +513,9 @@ Resources:
           - m8g.2xlarge
           - m8g.4xlarge
           - r7g.2xlarge
+        LaunchTemplate:
+          LaunchTemplateId: !Ref BatchWorkerLaunchTemplate
+          Version: $Latest
         Subnets: !Ref SubnetIds
         SecurityGroupIds:
           - !Ref BatchComputeSG
@@ -474,7 +595,7 @@ Resources:
       MetricName: FailedJobCount
       Dimensions:
         - Name: JobQueue
-          Value: spot-queue
+          Value: !GetAtt SpotQueue.JobQueueArn
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
@@ -498,7 +619,7 @@ Resources:
       MetricName: PendingJobCount
       Dimensions:
         - Name: JobQueue
-          Value: spot-queue
+          Value: !GetAtt SpotQueue.JobQueueArn
       Statistic: Maximum
       Period: 300
       EvaluationPeriods: 3
@@ -508,6 +629,113 @@ Resources:
       AlarmActions:
         - !Ref AlarmTopic
     DependsOn: SpotQueue
+
+# ---------------------------------------------------------------------------
+# Batch Job Metrics — EventBridge → Lambda → CloudWatch
+# Publishes SucceededJobCount, FailedJobCount, etc. to AWS/Batch namespace.
+# AWS Batch does not emit these metrics automatically; this is the back-end
+# that feeds the dashboard below.
+# ---------------------------------------------------------------------------
+
+  BatchMetricsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectTag}-batch-metrics-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: PutBatchMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: AWS/Batch
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  BatchMetricsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: NextflowRunnerPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectTag}-batch-metrics"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt BatchMetricsLambdaRole.Arn
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import boto3
+
+          cw = boto3.client('cloudwatch')
+
+          METRIC_MAP = {
+              'SUBMITTED': 'SubmittedJobCount',
+              'PENDING':   'PendingJobCount',
+              'RUNNABLE':  'RunnableJobCount',
+              'STARTING':  'StartingJobCount',
+              'RUNNING':   'RunningJobCount',
+              'SUCCEEDED': 'SucceededJobCount',
+              'FAILED':    'FailedJobCount',
+          }
+
+          def handler(event, context):
+              detail = event.get('detail', {})
+              status = detail.get('status')
+              job_queue = detail.get('jobQueue')  # full ARN from Batch events
+              metric = METRIC_MAP.get(status)
+              if not metric or not job_queue:
+                  return
+              cw.put_metric_data(
+                  Namespace='AWS/Batch',
+                  MetricData=[{
+                      'MetricName': metric,
+                      'Dimensions': [{'Name': 'JobQueue', 'Value': job_queue}],
+                      'Value': 1,
+                      'Unit': 'Count',
+                  }]
+              )
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  BatchJobStateRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectTag}-batch-job-state-change"
+      Description: "Capture Batch job state changes and publish counts to CloudWatch AWS/Batch namespace"
+      EventPattern:
+        source:
+          - aws.batch
+        detail-type:
+          - Batch Job State Change
+      State: ENABLED
+      Targets:
+        - Id: BatchMetricsLambda
+          Arn: !GetAtt BatchMetricsFunction.Arn
+
+  BatchMetricsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt BatchMetricsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BatchJobStateRule.Arn
 
 # ---------------------------------------------------------------------------
 # CloudWatch Dashboard
@@ -526,30 +754,15 @@ Resources:
               "properties": {
                 "title": "Job Status — spot-queue",
                 "metrics": [
-                  ["AWS/Batch", "SucceededJobCount", "JobQueue", "spot-queue", {"color": "#2ca02c", "label": "Succeeded"}],
-                  ["AWS/Batch", "FailedJobCount",    "JobQueue", "spot-queue", {"color": "#d62728", "label": "Failed"}],
-                  ["AWS/Batch", "PendingJobCount",   "JobQueue", "spot-queue", {"color": "#ff7f0e", "label": "Pending"}],
-                  ["AWS/Batch", "RunnableJobCount",  "JobQueue", "spot-queue", {"color": "#1f77b4", "label": "Runnable"}],
-                  ["AWS/Batch", "StartingJobCount",  "JobQueue", "spot-queue", {"color": "#9467bd", "label": "Starting"}],
-                  ["AWS/Batch", "RunningJobCount",   "JobQueue", "spot-queue", {"color": "#17becf", "label": "Running"}]
+                  ["AWS/Batch", "SucceededJobCount", "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#2ca02c", "label": "Succeeded"}],
+                  ["AWS/Batch", "FailedJobCount",    "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#d62728", "label": "Failed"}],
+                  ["AWS/Batch", "PendingJobCount",   "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#ff7f0e", "label": "Pending"}],
+                  ["AWS/Batch", "RunnableJobCount",  "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#1f77b4", "label": "Runnable"}],
+                  ["AWS/Batch", "StartingJobCount",  "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#9467bd", "label": "Starting"}],
+                  ["AWS/Batch", "RunningJobCount",   "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#17becf", "label": "Running"}]
                 ],
                 "period": 300,
                 "stat": "Sum",
-                "view": "timeSeries",
-                "region": "${AWS::Region}"
-              }
-            },
-            {
-              "type": "metric",
-              "x": 12, "y": 0, "width": 12, "height": 6,
-              "properties": {
-                "title": "vCPU Utilization by Compute Environment",
-                "metrics": [
-                  ["AWS/Batch", "CPUUtilization", "ComputeEnvironment", "${ProjectTag}-spot",     {"label": "Spot CE vCPUs"}],
-                  ["AWS/Batch", "CPUUtilization", "ComputeEnvironment", "${ProjectTag}-ondemand", {"label": "OnDemand CE vCPUs"}]
-                ],
-                "period": 300,
-                "stat": "Average",
                 "view": "timeSeries",
                 "region": "${AWS::Region}"
               }
@@ -571,8 +784,8 @@ Resources:
               "properties": {
                 "title": "Job Failure Rate (Failed / Submitted)",
                 "metrics": [
-                  ["AWS/Batch", "FailedJobCount",    "JobQueue", "spot-queue"],
-                  ["AWS/Batch", "SucceededJobCount", "JobQueue", "spot-queue"]
+                  ["AWS/Batch", "FailedJobCount",    "JobQueue", "${SpotQueue.JobQueueArn}"],
+                  ["AWS/Batch", "SucceededJobCount", "JobQueue", "${SpotQueue.JobQueueArn}"]
                 ],
                 "period": 3600,
                 "stat": "Sum",

@@ -5,7 +5,72 @@ infrastructure for running the `nf-reads-profiler` Nextflow pipeline from an
 EC2 runner VM. All compute nodes use **Graviton (ARM64)** instances — the
 same architecture as the runner (`r8g.2xlarge`).
 
-## Architecture
+To see what's running right now, view [the dashbaord](https://us-east-2.console.aws.amazon.com/cloudwatch/home?region=us-east-2#dashboards/dashboard/nf-reads-profiler-batch?start=PT72H). Or run
+
+```bash
+# List all running VMs
+aws ec2 describe-instances --region us-east-2 \
+  --filters "Name=instance-state-name,Values=running,pending" \
+  --query 'Reservations[].Instances[].[InstanceId,InstanceType,LaunchTime,IamInstanceProfile.Arn]' \
+  --output text
+```
+
+We expect to see only one VM; the 'head-node' we are connected to now!
+
+```bash
+#kill a vm
+aws ec2 terminate-instances --region us-east-2 --instance-ids i_asdf_copy_here
+```
+
+
+---
+
+## Part 0: Tear down the stack
+
+The workdir bucket (`gutz-nf-reads-profilers-workdir`) is deleted with the stack — but CloudFormation
+requires the bucket to be **empty first**. The 30-day lifecycle rule handles most cleanup
+automatically; for an immediate teardown, empty it manually:
+
+```bash
+# 1. Empty the workdir bucket (required before stack deletion)
+aws s3 rm s3://gutz-nf-reads-profilers-workdir --recursive
+
+# 2. Delete the stack (IAM roles, compute envs, job queue, alarms, workdir bucket)
+aws cloudformation delete-stack \
+  --stack-name nf-reads-profiler-batch \
+  --region us-east-2
+
+# 3. Wait for deleation
+aws cloudformation wait stack-delete-complete \
+  --stack-name nf-reads-profiler-batch \
+  --region us-east-2
+
+# 4. Check on head-node-role. We should NOT see nf-reads-profiler-nextflow-runner-policy in this list.
+aws iam list-attached-role-policies --role-name head-node-role \
+  --query "AttachedPolicies[].PolicyName"
+
+# 4. Detach the runner policy (in case it's not removed automatically)
+aws iam detach-role-policy \
+  --role-name head-node-role \
+  --policy-arn arn:aws:iam::730883236839:policy/nf-reads-profiler-nextflow-runner-policy
+
+```
+
+The output data is in a different bucket!
+
+The **runs bucket** (`gutz-nf-reads-profilers-runs`) survives stack deletion. Delete it
+manually only when you no longer need the results:
+
+```bash
+# This is the output data, careful!
+# aws s3 rm # s3://gutz-nf-reads-profilers-runs --recursive
+# aws s3api delete-bucket # --bucket gutz-nf-reads-profilers-runs --region us-east-2
+```
+
+
+## Part 1: First Time Setup
+
+### Architecture
 
 ```
 EC2 Nextflow Runner VM — r8g.2xlarge (Graviton 4, ARM64)
@@ -32,40 +97,557 @@ S3: s3://gutz-nf-reads-profilers-runs  ← input + results    — DeletionPolicy
 
 ---
 
-## Prerequisites
+### EFS volume (metaomics databases)
+
+# EFS volume is unfinished. Instead, we run `aws s3 sync` in Launch Template
+
+The MetaPhlAn / HUMAnN / ChocoPhlAn / UniRef databases are large (~100–500 GB),
+slow to download, and shared read-only by every Batch worker. They live on a
+dedicated EFS filesystem that is **managed outside this CloudFormation stack**
+so the data survives stack teardowns and recreations.
+
+```
+EFS: nf-reads-profiler-dbs  ← /mnt/dbs on every worker — SELF-MANAGED, survives everything
+     └─ mount targets in every Batch subnet
+     └─ SG allows NFS (2049) from the Batch compute SG
+```
+
+**Why outside the stack?** Databases take hours to populate. The Batch stack
+has already been torn down and recreated once (see "Drift" troubleshooting
+below). Keeping EFS separate means stack churn never touches the data.
+
+**Ownership split:**
+- Filesystem, mount targets, SG → **you**, via the steps below
+- Mount command on workers → stack, via `UserData` in the launch template
+- Stack receives the filesystem ID as a parameter and mounts it at `/mnt/dbs`
+
+#### 1. Create the EFS security group
+
+Allows inbound NFS from the Batch compute SG created by the stack.
+
+```bash
+# Look up the Batch compute SG id (created by the stack)
+BATCH_SG=$(aws ec2 describe-security-groups --region us-east-2 \
+  --filters "Name=group-name,Values=nf-reads-profiler-batch-compute-sg" \
+  --query "SecurityGroups[0].GroupId" --output text)
+echo "Batch SG: $BATCH_SG"
+
+# Create the EFS SG
+EFS_SG=$(aws ec2 create-security-group --region us-east-2 \
+  --group-name nf-reads-profiler-efs-sg \
+  --description "NFS access to nf-reads-profiler metaomics DBs" \
+  --vpc-id vpc-06ad1e39bb8cd26df \
+  --query "GroupId" --output text)
+echo "EFS SG: $EFS_SG"
+
+# Allow NFS from Batch workers
+aws ec2 authorize-security-group-ingress --region us-east-2 \
+  --group-id "$EFS_SG" \
+  --protocol tcp --port 2049 --source-group "$BATCH_SG"
+
+# Set source-group to the SG attached to your head-node so we can copy in data
+aws ec2 authorize-security-group-ingress --region us-east-2 \
+  --group-id "$EFS_SG" \
+  --protocol tcp --port 2049 --source-group sg-00a896042888e5fca
+```
+
+#### 2. Create the EFS filesystem
+
+```bash
+# Grant permission if needed
+aws iam put-role-policy \
+  --role-name head-node-role \
+  --policy-name AllowEFSManagement \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "elasticfilesystem:CreateFileSystem",
+                "elasticfilesystem:TagResource",
+                "elasticfilesystem:CreateMountTarget",
+                "elasticfilesystem:DescribeMountTargets",
+                "elasticfilesystem:DescribeFileSystems",
+                "ec2:DescribeSubnets",
+                "ec2:DescribeNetworkInterfaces",
+                "ec2:CreateNetworkInterface",
+                "ec2:DeleteNetworkInterface",
+                "ec2:ModifyNetworkInterfaceAttribute",
+                "ec2:DescribeSecurityGroups"
+            ],
+            "Resource": "*"
+        }
+    ]
+}'
+
+EFS_ID=$(aws efs create-file-system --region us-east-2 \
+  --performance-mode generalPurpose \
+  --throughput-mode elastic \
+  --encrypted \
+  --tags Key=Name,Value=nf-reads-profiler-dbs \
+         Key=Project,Value=nf-reads-profiler \
+  --query "FileSystemId" --output text)
+echo "EFS: $EFS_ID"
+```
+
+`elastic` throughput scales automatically and only charges for what you use —
+good default while we're learning the workload. Switch to `provisioned` later
+if consistent read throughput matters.
+
+#### 3. Create a mount target in each Batch subnet
+
+One mount target per AZ avoids cross-AZ NFS data charges.
+
+```bash
+for SUBNET in subnet-09159c654acc505a3 subnet-03afe111356916511 subnet-0d0f1d152c1656677; do
+  aws efs create-mount-target --region us-east-2 \
+    --file-system-id "$EFS_ID" \
+    --subnet-id "$SUBNET" \
+    --security-groups "$EFS_SG"
+done
+
+# Verify all three are 'available' (takes ~1 min)
+aws efs describe-mount-targets --region us-east-2 \
+  --file-system-id "$EFS_ID" \
+  --query "MountTargets[].{AZ:AvailabilityZoneName,State:LifeCycleState}"
+```
+
+#### 4. Record the filesystem ID
+
+Save `$EFS_ID` — the stack will take it as a parameter (`EfsFileSystemId`)
+when we wire up the mount in `UserData`. Until that wiring lands, workers
+won't see `/mnt/dbs` and the pipeline still needs `nextflow.config` database
+paths to resolve on each worker (or via `-params-file`).
+
+#### 5. Populate the databases
+
+From the runner VM (once its SG is allowed on port 2049):
+
+```bash
+sudo mkdir -p /mnt/dbs
+sudo mount -t efs -o tls "$EFS_ID":/ /mnt/dbs
+
+# Copy existing DBs from the runner's local disk
+sudo rsync -a --info=progress2 /home/ubuntu/disk_dbs/ /mnt/dbs/
+```
+
+#### Teardown
+
+EFS is not deleted by stack teardown. To remove it manually:
+
+```bash
+# Delete mount targets first
+for MT in $(aws efs describe-mount-targets --file-system-id "$EFS_ID" \
+              --query "MountTargets[].MountTargetId" --output text); do
+  # disable for now
+  # aws efs delete-mount-target --mount-target-id # "$MT"
+done
+
+# Then the filesystem, then the SG
+# aws efs delete-file-system --file-system-id "$EFS_ID"
+# aws ec2 delete-security-group --group-id "$EFS_SG"
+```
+
+---
+
+### Prerequisites
 
 - AWS CLI v2 configured (`aws configure` or instance role)
 - AWS account `730883236839`, region `us-east-2`
 - An existing EC2 runner VM (`r8g.2xlarge` or similar Graviton) with an IAM instance role
 - Nextflow ≥ 23.x and Java 17 installed on the runner:
-  ```bash
-  sudo yum install -y java-17-amazon-corretto
-  curl -s https://get.nextflow.io | bash && sudo mv nextflow /usr/local/bin/
-  ```
-- Your VPC ID and at least one subnet ID:
-  ```bash
-  # get value for VpcId later
-  aws ec2 describe-vpcs --query "Vpcs[?IsDefault].VpcId" --output text
 
-  # get values for SubnetIds later
-  aws ec2 describe-subnets --filters "Name=defaultForAz,Values=true" \
-    --query "Subnets[].SubnetId" --output text
-  ```
+```bash
+sudo yum install -y java-17-amazon-corretto
+curl -s https://get.nextflow.io | bash && sudo mv nextflow /usr/local/bin/
+```
+
+- Your VPC ID and at least one subnet ID:
+
+```bash
+# get value for VpcId later
+aws ec2 describe-vpcs --query "Vpcs[?IsDefault].VpcId" --output text
+
+# get values for SubnetIds later
+aws ec2 describe-subnets --filters "Name=defaultForAz,Values=true" \
+  --query "Subnets[].SubnetId" --output text
+```
+
 - An email address for alerts (budget + CloudWatch alarms)
 
 ---
 
-## Deploy the Stack
+## Part 2: Deploy the Stack
 
 ### 1. Validate the template
 
 ```bash
+# Go to repo root
+cd /home/ubuntu/github/nf-reads-profiler
+
 aws cloudformation validate-template \
   --template-body file://./infra/batch-stack.yaml \
   --region us-east-2
+
+# Look up the current AL2023 ARM64 ECS AMI, save to env var
 ```
 
 ### 2. Deploy
+
+```bash
+EcsAmiId=$(aws ec2 describe-images --region us-east-2 --owners amazon \
+  --filters "Name=name,Values=al2023-ami-ecs-hvm-*-kernel-*-arm64" \
+            "Name=state,Values=available" \
+  --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' --output text) \
+&& echo "AMI: $EcsAmiId" \
+&& test -n "$EcsAmiId" \
+&& aws cloudformation deploy \
+  --stack-name nf-reads-profiler-batch \
+  --template-file infra/batch-stack.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region us-east-2 \
+  --parameter-overrides \
+    VpcId=vpc-06ad1e39bb8cd26df \
+    SubnetIds="subnet-09159c654acc505a3,subnet-03afe111356916511,subnet-0d0f1d152c1656677" \
+    WorkDirBucketName=gutz-nf-reads-profilers-workdir \
+    RunsBucketName=gutz-nf-reads-profilers-runs \
+    BudgetAlertEmail=colin@vasogo.com \
+    MonthlyBudgetThreshold=100 \
+    SpotBidPercentage=70 \
+    MaxvCPUsSpot=16 \
+    MaxvCPUsOnDemand=8 \
+    ProjectTag=nf-reads-profiler \
+    EnvironmentTag=development \
+    EcsAmiId="$EcsAmiId" \
+  --tags Repo=nf-reads-profiler Environment=development
+```
+
+> **`RunsBucketName`** must be globally unique across all AWS accounts.
+> If `gutz-nf-reads-profilers-runs` is taken, choose another name and update
+> `conf/aws_batch.config` accordingly.
+>
+> **Subnet note:** Use public subnets (auto-assign public IP) or private subnets
+> with a NAT gateway — Batch instances need outbound internet for DockerHub pulls.
+
+### 3. Get stack outputs
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name nf-reads-profiler-batch \
+  --region us-east-2 \
+  --query "Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}" \
+  --output text
+```
+
+Save for the next steps: **From April 21st, 2026**
+  - `NextflowRunnerPolicyArn` = arn:aws:iam::730883236839:policy/nf-reads-profiler-nextflow-runner-policy
+  - `BatchJobRoleArn`         = arn:aws:iam::730883236839:role/nf-reads-profiler-batch-job-role
+
+
+### 4. Post-Deploy: Attach the `NextflowRunnerPolicyArn` we just recorded
+
+**From April 21st, 2026**
+
+```bash
+# Verify
+aws iam list-attached-role-policies --role-name head-node-role | grep "runner-policy"
+# should show two lines, "PolicyName" and "PolicyArn" with 'runner-policy' near the end
+
+# If not already, pass --role-name name of the IAM role attached to your runner VM
+# and pass --policy-arn the full policy arn from Step 3.
+aws iam attach-role-policy \
+  --role-name head-node-role \
+  --policy-arn arn:aws:iam::730883236839:policy/nf-reads-profiler-nextflow-runner-policy
+
+```
+
+### 5. Post-Deploy: Add or update the `BatchJobRoleArn` we just recorded
+
+```bash
+grep "jobRole" conf/aws_batch.config
+# should show one line matching arn ID from above
+```
+
+---
+
+## Uploading Samplesheets
+
+Samplesheets are small CSVs. Upload from the runner VM to the runs bucket:
+
+```bash
+aws s3 cp my-study.csv s3://gutz-nf-reads-profilers-runs/samplesheets/my-study.csv
+
+# List uploaded samplesheets
+aws s3 ls s3://gutz-nf-reads-profilers-runs/samplesheets/
+```
+
+Alternatively, keep samplesheets on the runner's local disk and pass a local path —
+Nextflow copies them into `workDir` automatically.
+
+---
+
+# Part 2: Confirming Setup Before a Run
+
+Run these checks on the runner VM before submitting a pipeline job.
+
+## Pre-Run Checklist
+
+### 1. Check Batch job queue is ENABLED and VALID
+
+```bash
+aws batch describe-job-queues --job-queues spot-queue --region us-east-2 \
+  --query "jobQueues[0].{State:state,Status:status}"
+```
+
+### 2. Check compute environments are ENABLED and VALID
+
+```bash
+aws batch describe-compute-environments \
+  --region us-east-2 \
+  --query "computeEnvironments[].{Name:computeEnvironmentName,State:state,Status:status}"
+```
+
+### 3. Check S3 buckets are accessible
+
+```bash
+aws s3 ls s3://gutz-nf-reads-profilers-workdir/ --region us-east-2 | head
+aws s3 ls s3://gutz-nf-reads-profilers-runs/samplesheets/ --region us-east-2
+```
+
+### 4. Check IAM runner policy is attached
+
+```bash
+aws iam list-attached-role-policies --role-name head-node-role \
+  --query "AttachedPolicies[].PolicyName"
+```
+
+### 5. Get CloudWatch Dashboard URL
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name nf-reads-profiler-batch \
+  --query "Stacks[0].Outputs[?OutputKey=='DashboardUrl'].OutputValue" \
+  --output text --region us-east-2
+```
+
+---
+
+## Run the Pipeline
+
+From the EC2 runner VM:
+
+```bash
+# Example run.
+# We set the input manifest and output project name here, with
+# the goal that the `aws_batch.config` can be more stable / reusable than the
+# conf files I used to do incremental runs locally.
+# The goal is to keep the confs stable, then just change input path and/or project.
+nextflow run main.nf \
+  -profile aws \
+  --input  s3://gutz-nf-reads-profilers-runs/samplesheets/sra-child-max005.csv \
+  --project child_max_aws_batch \
+  -resume
+```
+
+Check on results. The `_readcount.txt` files are good for this.
+
+```bash
+aws s3 ls s3://gutz-nf-reads-profilers-runs/results/child_min/SRP662258/readcount/ --region us-east-2 | wc -l
+aws s3 ls s3://gutz-nf-reads-profilers-runs/results/child_mid/SRP662258/readcount/ --region us-east-2 | wc -l
+aws s3 ls s3://gutz-nf-reads-profilers-runs/results/child_max/SRP662258/readcount/ --region us-east-2 | wc -l
+```
+
+Key flags:
+- `-resume` — reuses cached work; essential for long pipelines
+- `-profile aws` — loads `conf/aws_batch.config` (spot-queue, S3 work dir)
+- No credential files needed when running on an EC2 instance with the runner policy attached
+
+### Database paths
+
+`nextflow.config` defaults point to local paths (`/dbs/omicsdata/...`).
+
+TODO: Override with S3 URIs for AWS runs in the `aws_batch.config` file, or with the CLI:
+
+```bash
+nextflow run main.nf -profile aws \
+  --direct_metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vJan25 \
+  --direct_metaphlan_id mpa_vJan25_CHOCOPhlAnSGB_202503 \
+  --humann_metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vOct22_202403 \
+  --humann_chocophlan s3://your-db-bucket/humann/4.0/chocophlan \
+  --humann_uniref s3://your-db-bucket/humann/4.0/uniref/uniref \
+  --humann_utilitymap s3://your-db-bucket/humann/4.0/utility_mapping/utility_mapping \
+  ...
+```
+
+---
+
+# Part 3: Troubleshooting
+
+## Compute Environments Show as INVALID
+
+**Symptom:** Pre-run check (Part 2, step 2) returns `"Status": "INVALID"`.
+
+**Diagnose:** Get the status reason:
+
+```bash
+aws batch describe-compute-environments \
+  --region us-east-2 \
+  --query "computeEnvironments[].{Name:computeEnvironmentName,Status:status,Reason:statusReason}"
+```
+
+---
+
+### Fix: "Launch Template UserData is not MIME multipart format"
+
+**Cause:** AWS Batch requires UserData in MIME multipart format so it can merge its own
+ECS bootstrap script with yours. A plain `#!/bin/bash` script fails validation.
+
+**Fix already applied** in `infra/batch-stack.yaml` (April 2026):
+- UserData wrapped in MIME multipart envelope
+- `ServiceRole` removed from both compute environments so they use the Batch service-linked role (`AWSServiceRoleForBatch`) — required to allow future launch template updates via CLI
+
+To redeploy:
+
+**Step 1 — Update the CloudFormation stack:**
+
+```bash
+aws cloudformation deploy \
+  --stack-name nf-reads-profiler-batch \
+  --template-file infra/batch-stack.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region us-east-2 \
+  --parameter-overrides \
+    VpcId=vpc-06ad1e39bb8cd26df \
+    SubnetIds="subnet-09159c654acc505a3,subnet-03afe111356916511,subnet-0d0f1d152c1656677" \
+    WorkDirBucketName=gutz-nf-reads-profilers-workdir \
+    RunsBucketName=gutz-nf-reads-profilers-runs \
+    BudgetAlertEmail=colin@vasogo.com \
+    MonthlyBudgetThreshold=100 \
+    SpotBidPercentage=70 \
+    MaxvCPUsSpot=16 \
+    MaxvCPUsOnDemand=8 \
+    ProjectTag=nf-reads-profiler \
+    EnvironmentTag=development
+```
+
+**Step 2 — Wait for the stack update to complete:**
+
+```bash
+aws cloudformation wait stack-update-complete \
+  --stack-name nf-reads-profiler-batch \
+  --region us-east-2
+```
+
+**Step 3 — Force compute environments to re-validate (disable then re-enable):**
+
+Compute environment names are auto-generated, so look them up from the job queue first:
+
+```bash
+# Look up CE ARNs from the job queue
+CE_SPOT=$(aws batch describe-job-queues --job-queues spot-queue --region us-east-2 \
+  --query "jobQueues[0].computeEnvironmentOrder[0].computeEnvironment" --output text)
+CE_ONDEMAND=$(aws batch describe-job-queues --job-queues spot-queue --region us-east-2 \
+  --query "jobQueues[0].computeEnvironmentOrder[1].computeEnvironment" --output text)
+
+aws batch update-compute-environment --compute-environment $CE_SPOT --state DISABLED --region us-east-2
+aws batch update-compute-environment --compute-environment $CE_ONDEMAND --state DISABLED --region us-east-2
+```
+
+Wait ~30 seconds, then re-enable:
+
+```bash
+aws batch update-compute-environment --compute-environment $CE_SPOT --state ENABLED --region us-east-2
+aws batch update-compute-environment --compute-environment $CE_ONDEMAND --state ENABLED --region us-east-2
+```
+
+**Step 4 — Confirm both environments are VALID:**
+
+```bash
+aws batch describe-compute-environments \
+  --region us-east-2 \
+  --query "computeEnvironments[].{Name:computeEnvironmentName,State:state,Status:status}"
+```
+
+Expected output (names are auto-generated):
+```json
+[
+    {"Name": "nf-reads-profiler-batch-OnDema-XXXXXXXXXXXX", "State": "ENABLED", "Status": "VALID"},
+    {"Name": "nf-reads-profiler-batch-SpotCo-XXXXXXXXXXXX", "State": "ENABLED", "Status": "VALID"}
+]
+```
+
+---
+
+### Fix: Drift — Batch compute environments deleted outside CloudFormation
+
+**Symptom:** `aws cloudformation deploy` fails with `ResourceStatusReason: NotFound` for
+`SpotComputeEnvironment` or `OnDemandComputeEnvironment`. Stack status is `UPDATE_ROLLBACK_COMPLETE`.
+
+**Diagnose:**
+
+```bash
+# Stack should show UPDATE_ROLLBACK_COMPLETE
+aws cloudformation describe-stacks \
+  --stack-name nf-reads-profiler-batch \
+  --region us-east-2 \
+  --query "Stacks[0].StackStatus" --output text
+
+# Compute environments should return empty — confirms drift
+aws batch describe-compute-environments \
+  --region us-east-2 \
+  --query "computeEnvironments[].computeEnvironmentName"
+```
+
+**Cause:** A partial deployment deleted the old compute environments but failed to create the
+new `-v2` ones. CloudFormation's internal state still shows them as existing. Because the
+template has accumulated changes across failed attempts, *every* deploy tries to update the
+phantom CEs and immediately fails with NotFound — there is no minimal change that avoids it.
+
+**Fix (preserves workdir bucket files for Nextflow caching):**
+
+Use `--retain-resources` during stack deletion to skip the non-empty workdir bucket. After
+deletion the bucket remains intact. CloudFormation's `CreateBucket` is idempotent for
+same-account, same-region buckets, so the redeploy "creates" and adopts the existing bucket
+with all its files.
+
+**Step 1 — Detach the runner policy:**
+
+```bash
+aws iam detach-role-policy \
+  --role-name head-node-role \
+  --policy-arn arn:aws:iam::730883236839:policy/nf-reads-profiler-nextflow-runner-policy
+```
+
+**Step 2 — Delete the stack, retaining the workdir bucket and phantom Batch resources:**
+
+`--retain-resources` only works from `DELETE_FAILED` state, so this is a two-step process.
+First trigger the delete (it will fail on the non-empty bucket), then retry with the retain flag.
+
+```bash
+# Step 2a — start deletion; will fail on the non-empty workdir bucket
+aws cloudformation delete-stack \
+  --stack-name nf-reads-profiler-batch \
+  --region us-east-2
+
+# Wait until it enters DELETE_FAILED (watch the console or poll):
+aws cloudformation describe-stacks \
+  --stack-name nf-reads-profiler-batch \
+  --region us-east-2 \
+  --query "Stacks[0].StackStatus" --output text
+
+# Step 2b — retry, skipping only the bucket (phantom Batch resources already deleted)
+aws cloudformation delete-stack \
+  --stack-name nf-reads-profiler-batch \
+  --retain-resources S3WorkDirBucket \
+  --region us-east-2
+
+aws cloudformation wait stack-delete-complete \
+  --stack-name nf-reads-profiler-batch \
+  --region us-east-2
+```
+
+**Step 3 — Redeploy:**
 
 ```bash
 aws cloudformation deploy \
@@ -88,110 +670,26 @@ aws cloudformation deploy \
   --tags Repo=nf-reads-profiler Environment=development
 ```
 
-> **`RunsBucketName`** must be globally unique across all AWS accounts.
-> If `gutz-nf-reads-profilers-runs` is taken, choose another name and update
-> `conf/aws_batch.config` accordingly.
->
-> **Subnet note:** Use public subnets (auto-assign public IP) or private subnets
-> with a NAT gateway — Batch instances need outbound internet for DockerHub pulls.
-
-### 3. Get stack outputs
+**Step 4 — Re-attach the runner policy:**
 
 ```bash
-aws cloudformation describe-stacks \
-  --stack-name nf-reads-profiler-batch \
-  --region us-east-2 \
-  --query "Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}" \
-  --output text
-```
-
-Save for the next steps: **From March 31, 2026**
-  - `NextflowRunnerPolicyArn` = arn:aws:iam::730883236839:policy/nf-reads-profiler-nextflow-runner-policy
-  - `BatchJobRoleArn`         = arn:aws:iam::730883236839:role/nf-reads-profiler-batch-job-role
-
----
-
-## Post-Deploy: Attach Runner Policy
-
-**From March 31, 2026**
-
-```bash
-# Replace <runner-role-name> with the IAM role attached to your runner VM
 aws iam attach-role-policy \
   --role-name head-node-role \
   --policy-arn arn:aws:iam::730883236839:policy/nf-reads-profiler-nextflow-runner-policy
-
-# Verify
-aws iam list-attached-role-policies --role-name head-node-role
 ```
 
----
-
-## Post-Deploy: Add Job Role to Nextflow Config
-
-Add the `BatchJobRoleArn` from stack outputs to `conf/aws_batch.config`:
-
-```groovy
-aws {
-    batch {
-        jobRole = '<BatchJobRoleArn from stack outputs>'
-    }
-    // ... existing client block ...
-}
-```
-
----
-
-## Uploading Samplesheets
-
-Samplesheets are small CSVs. Upload from the runner VM to the runs bucket:
+**Step 5 — Confirm both environments are VALID:**
 
 ```bash
-aws s3 cp my-study.csv s3://gutz-nf-reads-profilers-runs/samplesheets/my-study.csv
-
-# List uploaded samplesheets
-aws s3 ls s3://gutz-nf-reads-profilers-runs/samplesheets/
+aws batch describe-compute-environments \
+  --region us-east-2 \
+  --query "computeEnvironments[].{Name:computeEnvironmentName,State:state,Status:status}"
 ```
 
-Alternatively, keep samplesheets on the runner's local disk and pass a local path —
-Nextflow copies them into `workDir` automatically.
-
----
-
-## Run the Pipeline
-
-From your EC2 runner VM:
-
-```bash
-# Standard run
-nextflow run /path/to/nf-reads-profiler/main.nf \
-  -profile aws \
-  --input s3://gutz-nf-reads-profilers-runs/samplesheets/my-study.csv \
-  --outdir s3://gutz-nf-reads-profilers-runs/results/ \
-  --project my-project \
-  -resume
-```
-
-Key flags: (Untested)
-- `-resume` — reuses cached work; essential for long pipelines
-- `-profile aws` — loads `conf/aws_batch.config` (spot-queue, S3 work dir)
-- No credential files needed when running on an EC2 instance with the runner policy attached
-
-### Database paths
-
-`nextflow.config` defaults point to local paths (`/dbs/omicsdata/...`).
-TODO: Override with S3 URIs for AWS runs in the conf file, or CLI:
-
-```bash
-nextflow run main.nf -profile aws \
-  --direct_metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vJan25 \
-  --direct_metaphlan_id mpa_vJan25_CHOCOPhlAnSGB_202503 \
-  --humann_metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vOct22_202403 \
-  --humann_chocophlan s3://your-db-bucket/humann/4.0/chocophlan \
-  --humann_uniref s3://your-db-bucket/humann/4.0/uniref/uniref \
-  --humann_utilitymap s3://your-db-bucket/humann/4.0/utility_mapping/utility_mapping \
-  ...
-```
+> **Note on `DeletionPolicy`:** The template currently has `DeletionPolicy: Retain` on
+> `S3WorkDirBucket`. The workdir bucket will survive future stack teardowns. To restore the
+> original behaviour (bucket deleted with stack), empty the bucket and change `DeletionPolicy`
+> back to `Delete` before tearing down.
 
 ---
 
@@ -266,42 +764,6 @@ aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
 - Spot EC2: ~$35–100
 - S3: ~$5–20/month total
 - Recommended budget threshold: **$500/month** to catch runaway jobs
-
----
-
-## Untested: Teardown
-
-The workdir bucket (`gutz-nf-reads-profilers-workdir`) is deleted with the stack — but CloudFormation
-requires the bucket to be **empty first**. The 30-day lifecycle rule handles most cleanup
-automatically; for an immediate teardown, empty it manually:
-
-```bash
-# 1. Empty the workdir bucket (required before stack deletion)
-aws s3 rm s3://gutz-nf-reads-profilers-workdir --recursive
-
-# 2. Delete the stack (IAM roles, compute envs, job queue, alarms, workdir bucket)
-aws cloudformation delete-stack \
-  --stack-name nf-reads-profiler-batch \
-  --region us-east-2
-
-# 3. Wait (~5 minutes)
-aws cloudformation wait stack-delete-complete \
-  --stack-name nf-reads-profiler-batch \
-  --region us-east-2
-
-# 4. Detach the runner policy (not removed automatically)
-aws iam detach-role-policy \
-  --role-name <runner-role-name> \
-  --policy-arn <NextflowRunnerPolicyArn>
-```
-
-The **runs bucket** (`gutz-nf-reads-profilers-runs`) survives stack deletion. Delete it
-manually only when you no longer need the results:
-
-```bash
-aws s3 rm s3://gutz-nf-reads-profilers-runs --recursive
-aws s3api delete-bucket --bucket gutz-nf-reads-profilers-runs --region us-east-2
-```
 
 ---
 
