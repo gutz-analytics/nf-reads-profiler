@@ -235,7 +235,7 @@ Analysis introspection:
 
 
   ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
-  
+  // TODO where was this supposed to go?
 
   // Functional profiling (HUMAnN4) if not skipped
   if ( ! params.skipHumann ) {
