@@ -792,3 +792,49 @@ aws cloudformation execute-change-set \
   --change-set-name import-workdir-bucket \
   --stack-name nf-reads-profiler-batch
 ```
+
+---
+
+## Storage Lifecycle and Cleanup
+
+### Work directory (`gutz-nf-reads-profilers-workdir`)
+
+The CloudFormation template applies a **30-day lifecycle rule** that expires all
+objects after 30 days. This is the primary cleanup mechanism — no manual action
+needed for routine use.
+
+For immediate cleanup after a completed run:
+
+```bash
+# Remove a specific project's work files
+aws s3 rm "s3://gutz-nf-reads-profilers-workdir/" --recursive
+
+# Or remove only files older than a timestamp (requires listing + filtering)
+```
+
+**Warning:** Deleting work directory files breaks `-resume`. Only clean up after
+confirming all samples completed successfully.
+
+### Results bucket (`gutz-nf-reads-profilers-runs`)
+
+No automatic lifecycle — results persist indefinitely. Clean up manually per
+project:
+
+```bash
+# List projects
+aws s3 ls s3://gutz-nf-reads-profilers-runs/results/
+
+# Remove a specific project's results (irreversible)
+# aws s3 rm s3://gutz-nf-reads-profilers-runs/results/<project>/ --recursive
+```
+
+### Worker-local storage (`/mnt/dbs/`)
+
+Worker EBS volumes are configured with `DeleteOnTermination: true` — they are
+automatically destroyed when the instance terminates. No manual cleanup needed.
+
+### Nextflow reports and traces
+
+Timeline, report, and trace files are written to
+`<outdir>/<project>/reports/` with timestamps. These accumulate across runs.
+Periodically clean up old reports if storage becomes a concern.
