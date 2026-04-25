@@ -5,7 +5,7 @@ infrastructure for running the `nf-reads-profiler` Nextflow pipeline from an
 EC2 runner VM. All compute nodes use **Graviton (ARM64)** instances — the
 same architecture as the runner (`r8g.2xlarge`).
 
-To see what's running right now, view [the dashbaord](https://us-east-2.console.aws.amazon.com/cloudwatch/home?region=us-east-2#dashboards/dashboard/nf-reads-profiler-batch?start=PT72H). Or run
+To see what's running right now, view [the dashboard](https://us-east-2.console.aws.amazon.com/cloudwatch/home?region=us-east-2#dashboards/dashboard/nf-reads-profiler-batch?start=PT72H). Or run
 
 ```bash
 # List all running VMs
@@ -40,7 +40,7 @@ aws cloudformation delete-stack \
   --stack-name nf-reads-profiler-batch \
   --region us-east-2
 
-# 3. Wait for deleation
+# 3. Wait for deletion
 aws cloudformation wait stack-delete-complete \
   --stack-name nf-reads-profiler-batch \
   --region us-east-2
@@ -97,157 +97,16 @@ S3: s3://gutz-nf-reads-profilers-runs  ← input + results    — DeletionPolicy
 
 ---
 
-### EFS volume (metaomics databases)
+### Database placement (S3-sync to worker-local EBS)
 
-# EFS volume is unfinished. Instead, we run `aws s3 sync` in Launch Template
+Databases (~100–500 GB) are synced from S3 to each worker's local EBS at boot
+via the Launch Template `UserData` script. This avoids the complexity and cost
+of EFS/FSx while keeping read performance high. See
+[ADR-001](adr-001-db-placement.md) for the full rationale and alternatives
+considered.
 
-The MetaPhlAn / HUMAnN / ChocoPhlAn / UniRef databases are large (~100–500 GB),
-slow to download, and shared read-only by every Batch worker. They live on a
-dedicated EFS filesystem that is **managed outside this CloudFormation stack**
-so the data survives stack teardowns and recreations.
-
-```
-EFS: nf-reads-profiler-dbs  ← /mnt/dbs on every worker — SELF-MANAGED, survives everything
-     └─ mount targets in every Batch subnet
-     └─ SG allows NFS (2049) from the Batch compute SG
-```
-
-**Why outside the stack?** Databases take hours to populate. The Batch stack
-has already been torn down and recreated once (see "Drift" troubleshooting
-below). Keeping EFS separate means stack churn never touches the data.
-
-**Ownership split:**
-- Filesystem, mount targets, SG → **you**, via the steps below
-- Mount command on workers → stack, via `UserData` in the launch template
-- Stack receives the filesystem ID as a parameter and mounts it at `/mnt/dbs`
-
-#### 1. Create the EFS security group
-
-Allows inbound NFS from the Batch compute SG created by the stack.
-
-```bash
-# Look up the Batch compute SG id (created by the stack)
-BATCH_SG=$(aws ec2 describe-security-groups --region us-east-2 \
-  --filters "Name=group-name,Values=nf-reads-profiler-batch-compute-sg" \
-  --query "SecurityGroups[0].GroupId" --output text)
-echo "Batch SG: $BATCH_SG"
-
-# Create the EFS SG
-EFS_SG=$(aws ec2 create-security-group --region us-east-2 \
-  --group-name nf-reads-profiler-efs-sg \
-  --description "NFS access to nf-reads-profiler metaomics DBs" \
-  --vpc-id vpc-06ad1e39bb8cd26df \
-  --query "GroupId" --output text)
-echo "EFS SG: $EFS_SG"
-
-# Allow NFS from Batch workers
-aws ec2 authorize-security-group-ingress --region us-east-2 \
-  --group-id "$EFS_SG" \
-  --protocol tcp --port 2049 --source-group "$BATCH_SG"
-
-# Set source-group to the SG attached to your head-node so we can copy in data
-aws ec2 authorize-security-group-ingress --region us-east-2 \
-  --group-id "$EFS_SG" \
-  --protocol tcp --port 2049 --source-group sg-00a896042888e5fca
-```
-
-#### 2. Create the EFS filesystem
-
-```bash
-# Grant permission if needed
-aws iam put-role-policy \
-  --role-name head-node-role \
-  --policy-name AllowEFSManagement \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "elasticfilesystem:CreateFileSystem",
-                "elasticfilesystem:TagResource",
-                "elasticfilesystem:CreateMountTarget",
-                "elasticfilesystem:DescribeMountTargets",
-                "elasticfilesystem:DescribeFileSystems",
-                "ec2:DescribeSubnets",
-                "ec2:DescribeNetworkInterfaces",
-                "ec2:CreateNetworkInterface",
-                "ec2:DeleteNetworkInterface",
-                "ec2:ModifyNetworkInterfaceAttribute",
-                "ec2:DescribeSecurityGroups"
-            ],
-            "Resource": "*"
-        }
-    ]
-}'
-
-EFS_ID=$(aws efs create-file-system --region us-east-2 \
-  --performance-mode generalPurpose \
-  --throughput-mode elastic \
-  --encrypted \
-  --tags Key=Name,Value=nf-reads-profiler-dbs \
-         Key=Project,Value=nf-reads-profiler \
-  --query "FileSystemId" --output text)
-echo "EFS: $EFS_ID"
-```
-
-`elastic` throughput scales automatically and only charges for what you use —
-good default while we're learning the workload. Switch to `provisioned` later
-if consistent read throughput matters.
-
-#### 3. Create a mount target in each Batch subnet
-
-One mount target per AZ avoids cross-AZ NFS data charges.
-
-```bash
-for SUBNET in subnet-09159c654acc505a3 subnet-03afe111356916511 subnet-0d0f1d152c1656677; do
-  aws efs create-mount-target --region us-east-2 \
-    --file-system-id "$EFS_ID" \
-    --subnet-id "$SUBNET" \
-    --security-groups "$EFS_SG"
-done
-
-# Verify all three are 'available' (takes ~1 min)
-aws efs describe-mount-targets --region us-east-2 \
-  --file-system-id "$EFS_ID" \
-  --query "MountTargets[].{AZ:AvailabilityZoneName,State:LifeCycleState}"
-```
-
-#### 4. Record the filesystem ID
-
-Save `$EFS_ID` — the stack will take it as a parameter (`EfsFileSystemId`)
-when we wire up the mount in `UserData`. Until that wiring lands, workers
-won't see `/mnt/dbs` and the pipeline still needs `nextflow.config` database
-paths to resolve on each worker (or via `-params-file`).
-
-#### 5. Populate the databases
-
-From the runner VM (once its SG is allowed on port 2049):
-
-```bash
-sudo mkdir -p /mnt/dbs
-sudo mount -t efs -o tls "$EFS_ID":/ /mnt/dbs
-
-# Copy existing DBs from the runner's local disk
-sudo rsync -a --info=progress2 /home/ubuntu/disk_dbs/ /mnt/dbs/
-```
-
-#### Teardown
-
-EFS is not deleted by stack teardown. To remove it manually:
-
-```bash
-# Delete mount targets first
-for MT in $(aws efs describe-mount-targets --file-system-id "$EFS_ID" \
-              --query "MountTargets[].MountTargetId" --output text); do
-  # disable for now
-  # aws efs delete-mount-target --mount-target-id # "$MT"
-done
-
-# Then the filesystem, then the SG
-# aws efs delete-file-system --file-system-id "$EFS_ID"
-# aws ec2 delete-security-group --group-id "$EFS_SG"
-```
+Database paths in `conf/aws_batch.config` point to `/mnt/dbs/...` — these
+resolve on each worker after the S3 sync completes.
 
 ---
 
@@ -465,20 +324,10 @@ Key flags:
 
 ### Database paths
 
-`nextflow.config` defaults point to local paths (`/dbs/omicsdata/...`).
-
-TODO: Override with S3 URIs for AWS runs in the `aws_batch.config` file, or with the CLI:
-
-```bash
-nextflow run main.nf -profile aws \
-  --direct_metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vJan25 \
-  --direct_metaphlan_id mpa_vJan25_CHOCOPhlAnSGB_202503 \
-  --humann_metaphlan_db s3://your-db-bucket/metaphlan/metaphlan4/vOct22_202403 \
-  --humann_chocophlan s3://your-db-bucket/humann/4.0/chocophlan \
-  --humann_uniref s3://your-db-bucket/humann/4.0/uniref/uniref \
-  --humann_utilitymap s3://your-db-bucket/humann/4.0/utility_mapping/utility_mapping \
-  ...
-```
+`nextflow.config` defaults point to local paths (`/home/ubuntu/disk_dbs/...`).
+The `aws` profile overrides these to `/mnt/dbs/...` in `conf/aws_batch.config`
+— databases are synced from S3 to worker-local storage at boot (see
+[ADR-001](adr-001-db-placement.md)).
 
 ---
 
@@ -693,12 +542,9 @@ aws batch describe-compute-environments \
 
 ---
 
-# Untested from here down
-
-
 ## Cost Monitoring
 
-### Untested: AWS Budgets
+### AWS Budgets
 
 Alerts fire when actual spend reaches **80%** or forecasted spend exceeds **100%**
 of the monthly threshold for resources tagged `Project=nf-reads-profiler`.
@@ -708,7 +554,7 @@ View budgets: <https://us-east-2.console.aws.amazon.com/billing/home#/budgets>
 > **Tag activation delay:** Go to <https://us-east-2.console.aws.amazon.com/billing/home#/tags>
 > and activate `Project` as a cost allocation tag. Allow 24 hours.
 
-### Untested: AWS Cost Explorer
+### AWS Cost Explorer
 
 <https://us-east-2.console.aws.amazon.com/cost-management/home#/cost-explorer>
 
@@ -727,16 +573,16 @@ aws cloudformation describe-stacks \
   --output text
 ```
 
-### Untested: CloudWatch Alarms
+### CloudWatch Alarms
 
 | Alarm | Condition | Meaning |
 |---|---|---|
 | `batch-failed-jobs` | ≥ 5 failures in 5 min | Systemic error (bad image, IAM, etc.) |
 | `batch-high-pending` | ≥ 50 pending for 15 min | Spot + on-demand capacity exhausted |
 
-Spot interruptions are handled by `maxRetries=3` in `aws_batch.config` and do not trigger alarms.
+Spot interruptions are not automatically retried (`maxRetries=0` in `aws_batch.config`); use `-resume` to rerun failed samples.
 
-### Untested: Live job logs
+### Live job logs
 
 ```bash
 aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
@@ -748,7 +594,7 @@ aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
 
 ---
 
-## Untested: Estimated Costs (us-east-2, Graviton, 2025 spot pricing)
+## Estimated Costs (us-east-2, Graviton, 2025 spot pricing)
 
 | Resource | Rate | Notes |
 |---|---|---|
@@ -767,7 +613,7 @@ aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
 
 ---
 
-## Untested: Importing an Existing Workdir Bucket
+## Importing an Existing Workdir Bucket
 
 If `gutz-nf-reads-profilers-workdir` already exists, import it into the stack instead of recreating it:
 
