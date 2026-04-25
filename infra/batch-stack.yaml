@@ -88,6 +88,16 @@ Parameters:
                     "Name=state,Values=available" \
           --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' --output text
 
+  DbSourceBucket:
+    Type: String
+    Default: cjb-gutz-s3-demo
+    Description: >
+      S3 bucket that holds the pre-staged metaomics databases (MetaPhlAn,
+      HUMAnN4, ChocoPhlAn, UniRef). Workers sync this bucket to /mnt/dbs
+      at startup via the BatchWorkerLaunchTemplate UserData.
+      The EcsInstanceRole is granted read-only access to this bucket.
+      This bucket is NOT created or deleted by this stack.
+
 # ---------------------------------------------------------------------------
 # S3
 # ---------------------------------------------------------------------------
@@ -178,8 +188,8 @@ Resources:
                   - !Sub "arn:aws:s3:::${RunsBucketName}"
                   - !Sub "arn:aws:s3:::${RunsBucketName}/*"
                   # Database bucket
-                  - "arn:aws:s3:::cjb-gutz-s3-demo"
-                  - "arn:aws:s3:::cjb-gutz-s3-demo/*"
+                  - !Sub "arn:aws:s3:::${DbSourceBucket}"
+                  - !Sub "arn:aws:s3:::${DbSourceBucket}/*"
       Tags:
         - Key: Project
           Value: !Ref ProjectTag
@@ -394,45 +404,46 @@ Resources:
               DeleteOnTermination: true
               Encrypted: true
         UserData:
-          Fn::Base64: |
-            MIME-Version: 1.0
-            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+          Fn::Base64:
+            Fn::Sub: |
+              MIME-Version: 1.0
+              Content-Type: multipart/mixed; boundary="==BOUNDARY=="
 
-            --==BOUNDARY==
-            Content-Type: text/x-shellscript; charset="us-ascii"
+              --==BOUNDARY==
+              Content-Type: text/x-shellscript; charset="us-ascii"
 
-            #!/bin/bash
-            # Log everything to /var/log/nf-userdata.log for SSH-based debugging.
-            exec > >(tee -a /var/log/nf-userdata.log) 2>&1
-            set -x
-            echo "=== nf-reads-profiler user data starting at $(date) ==="
+              #!/bin/bash
+              # Log everything to /var/log/nf-userdata.log for SSH-based debugging.
+              exec > >(tee -a /var/log/nf-userdata.log) 2>&1
+              set -x
+              echo "=== nf-reads-profiler user data starting at $(date) ==="
 
-            ARCH=$(uname -m)
-            if [ "$ARCH" = "aarch64" ]; then
-              URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
-            else
-              URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
-            fi
+              ARCH=$(uname -m)
+              if [ "$ARCH" = "aarch64" ]; then
+                URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
+              else
+                URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+              fi
 
-            curl -fsSL "$URL" -o /tmp/miniconda.sh
-            bash /tmp/miniconda.sh -b -f -p /opt/conda-aws
-            rm /tmp/miniconda.sh
-            /opt/conda-aws/bin/conda install -c conda-forge --override-channels -y awscli
-            /opt/conda-aws/bin/aws --version
+              curl -fsSL "$URL" -o /tmp/miniconda.sh
+              bash /tmp/miniconda.sh -b -f -p /opt/conda-aws
+              rm /tmp/miniconda.sh
+              /opt/conda-aws/bin/conda install -c conda-forge --override-channels -y awscli
+              /opt/conda-aws/bin/aws --version
 
-            # stage dbs locally
-            mkdir -p /mnt/dbs
-          
-            # Sync everything EXCEPT referencedata (MEDI)
-            /opt/conda-aws/bin/aws s3 sync s3://cjb-gutz-s3-demo /mnt/dbs/ \
-                --exclude "referencedata/*" --quiet
-          
-            # Restart ECS so the agent sees the populated directory before accepting tasks
-            systemctl restart ecs
+              # stage dbs locally
+              mkdir -p /mnt/dbs
 
-            echo "=== nf-reads-profiler user data done at $(date) ==="
+              # Sync everything EXCEPT referencedata (MEDI)
+              /opt/conda-aws/bin/aws s3 sync s3://${DbSourceBucket} /mnt/dbs/ \
+                  --exclude "referencedata/*" --quiet
 
-            --==BOUNDARY==--
+              # Restart ECS so the agent sees the populated directory before accepting tasks
+              systemctl restart ecs
+
+              echo "=== nf-reads-profiler user data done at $(date) ==="
+
+              --==BOUNDARY==--
 
 # ---------------------------------------------------------------------------
 # Compute Environments — Graviton (ARM64) only

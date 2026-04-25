@@ -320,6 +320,7 @@ EcsAmiId=$(aws ec2 describe-images --region us-east-2 --owners amazon \
     ProjectTag=nf-reads-profiler \
     EnvironmentTag=development \
     EcsAmiId="$EcsAmiId" \
+    DbSourceBucket=cjb-gutz-s3-demo \
   --tags Repo=nf-reads-profiler Environment=development
 ```
 
@@ -413,6 +414,8 @@ aws batch describe-compute-environments \
 ```bash
 aws s3 ls s3://gutz-nf-reads-profilers-workdir/ --region us-east-2 | head
 aws s3 ls s3://gutz-nf-reads-profilers-runs/samplesheets/ --region us-east-2
+# Also verify the DB source bucket (DbSourceBucket param) is reachable
+aws s3 ls s3://cjb-gutz-s3-demo/ --region us-east-2 | head
 ```
 
 ### 4. Check IAM runner policy is attached
@@ -528,7 +531,8 @@ aws cloudformation deploy \
     MaxvCPUsSpot=16 \
     MaxvCPUsOnDemand=8 \
     ProjectTag=nf-reads-profiler \
-    EnvironmentTag=development
+    EnvironmentTag=development \
+    DbSourceBucket=cjb-gutz-s3-demo
 ```
 
 **Step 2 — Wait for the stack update to complete:**
@@ -667,6 +671,7 @@ aws cloudformation deploy \
     MaxvCPUsOnDemand=8 \
     ProjectTag=nf-reads-profiler \
     EnvironmentTag=development \
+    DbSourceBucket=cjb-gutz-s3-demo \
   --tags Repo=nf-reads-profiler Environment=development
 ```
 
