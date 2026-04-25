@@ -64,7 +64,7 @@ process profile_function {
   tag "$name"
   conda params.conda_humann4
   container params.docker_container_humann4
-  containerOptions '-u $(id -u):$(id -g)'
+  containerOptions '-u \$(id -u):\$(id -g)'
 
   memory 32.GB
   cpus 4
@@ -114,7 +114,7 @@ process combine_humann_tables {
   tag "$run"
   conda params.conda_humann4
   container params.docker_container_humann4
-  containerOptions '-u $(id -u):$(id -g)'
+  containerOptions '-u \$(id -u):\$(id -g)'
 
   publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/combined_tables" }, mode: 'copy', pattern: "*.{tsv,log}"
 
