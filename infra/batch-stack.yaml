@@ -439,9 +439,15 @@ Resources:
               # stage dbs locally
               mkdir -p /mnt/dbs
 
-              # Sync everything EXCEPT referencedata (MEDI)
+              # Sync only the four required database directories (~65 GiB).
+              # Exclude everything first, then include only what we need.
               /opt/conda-aws/bin/aws s3 sync s3://${DbSourceBucket} /mnt/dbs/ \
-                  --exclude "referencedata/*" --quiet
+                  --exclude "*" \
+                  --include "chocophlan_v4_alpha/*" \
+                  --include "full_mapping_v4_alpha/*" \
+                  --include "metaphlan_databases/*" \
+                  --include "uniref90_annotated_v4_alpha_ec_filtered/*" \
+                  --quiet
 
               # Start ECS now that databases are synced to /mnt/dbs
               systemctl start ecs
