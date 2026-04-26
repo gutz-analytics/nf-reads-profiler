@@ -87,8 +87,9 @@ Paths differ per profile:
 - Local / `test`: `/home/ubuntu/disk_dbs/...` (bind-mounted into Docker via
   `docker.runOptions` in `nextflow.config`).
 - AWS: `/mnt/dbs/...` — populated by an EC2 Launch Template `aws s3 sync` into
-  worker-local storage; see `infra/readme.md`. EFS is set up but currently
-  unused in favor of the S3-sync path.
+  worker-local storage; see `infra/readme.md`. The UserData stops the ECS
+  agent before syncing and starts it after, so workers only accept jobs once
+  all databases (~65 GiB) are present.
 
 `README.md` has the `docker run ... humann_databases --download` commands for
 rebuilding HUMAnN4/MetaPhlAn DBs when versions bump.
@@ -116,7 +117,7 @@ retries won't blow past these (prevents runaway memory on retry storms).
 Defined in `nextflow.config`:
 
 - `skipHumann` (default false) — skip functional profiling and all HUMAnN combine/split steps.
-- `singleEnd`, `mergeReads`, `nreads` (33,333,333 cap), `minreads` (100,000 floor; samples below this are logged and dropped, not failed).
+- `singleEnd`, `mergeReads`, `nreads` (32,000,000 cap), `minreads` (100,000 floor; samples below this are logged and dropped, not failed).
 - `humann_regroup`, `humann_regroups` (e.g. `"uniref90_ko,uniref90_rxn"`), `humann_split_size` — used by the currently-disabled regroup branch.
 - `humann_extraparams` — passthrough (test profile sets `--bypass-translated-search`).
 - MEDI: `enable_medi`, `confidence`, `consistency`, `entropy`, `multiplicity`, `read_length`, `threshold`, `batchsize`, `mapping`, plus fastp knobs (`trim_front`, `min_length`, `quality_threshold`).
@@ -151,3 +152,44 @@ Shipped on the Nextflow `PATH`. The table-processing scripts
 only reached when the biom-conversion branch is re-enabled. The `scrape_*.sh`
 helpers parse tool logs into MultiQC-custom-content TSVs; `medi_csv_to_biom.py`
 converts MEDI CSV outputs.
+
+## Custom agents and skills (`.claude/`)
+
+**Agents** (spawn via `@agent-name` or the Agent tool):
+
+- `batch-doctor` — read-only health check of the full Batch stack: CEs, queue,
+  recent failures, launch template, S3 buckets, Nextflow logs. Produces a
+  status table with WARN/FAIL callouts.
+- `log-reader` — parses `.nextflow.log*` and fetches CloudWatch logs for
+  failed Batch jobs. Produces a concise run report (succeeded/failed/aborted
+  tasks, error messages, timing).
+
+**Skills** (invoke via `/skill-name`):
+
+- `deploy-stack` — validates the CloudFormation template, deploys, waits, and
+  re-validates compute environments. Always shows the diff first.
+- `preflight` — pre-flight checklist before a pipeline run: CEs valid, queue
+  enabled, launch template has stop-ecs guard, S3 reachable, no stuck jobs.
+
+## Debugging AWS Batch failures
+
+When a pipeline run fails on AWS Batch, the diagnosis workflow is:
+
+1. **Read the Nextflow log** — `grep 'ERROR\|FAIL' .nextflow.log` for the
+   process name, exit code, and error summary.
+2. **Get the Batch job log** — find the failed job's CloudWatch log stream in
+   `/aws/batch/job` (log stream names follow
+   `<job-def>/default/<job-id>`). The last few lines usually have the root
+   cause.
+3. **Check worker state** — if the error is a missing file/DB, the S3 sync
+   may not have completed. SSH to the worker (if still running) and check
+   `/var/log/nf-userdata.log` and `ls /mnt/dbs/`.
+4. **Common failure modes**:
+   - "database does not exist" → S3 sync race (see `infra/readme.md`
+     troubleshooting).
+   - "Essential container in task exited" → container OOM or command error;
+     check CloudWatch logs for the specific error.
+   - "Job killed by NF" → Nextflow aborted the run after a different task
+     failed; find the original failure.
+   - Jobs stuck in RUNNABLE → no capacity; check CE MaxvCpus and spot
+     availability.
