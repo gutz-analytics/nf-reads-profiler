@@ -193,3 +193,29 @@ When a pipeline run fails on AWS Batch, the diagnosis workflow is:
      failed; find the original failure.
    - Jobs stuck in RUNNABLE → no capacity; check CE MaxvCpus and spot
      availability.
+
+## Guardrails (`.claude/hooks/guardrails.sh`)
+
+A PreToolUse hook that runs before every Bash, Write, and Edit call. Hard
+blocks (exit 2) are non-negotiable; soft blocks prompt for confirmation.
+
+**Hard blocks:**
+
+| Category | What's blocked |
+|----------|---------------|
+| Docker destruction | `docker compose down -v`, `docker volume rm/prune`, `docker system prune` |
+| Runaway EC2 | `aws ec2 run-instances`, `aws ec2 request-spot-instances` |
+| Batch escalation | `update-compute-environment` with `maxvCpus` > 64 |
+| CFN deletion | `aws cloudformation delete-stack` |
+| Disk bombs | `dd if=`, `fallocate`, `mkfs` |
+| Repo escape | `rm -r` outside the repo, Write/Edit to paths outside repo or `~/.claude/` |
+| Git destruction | `git push --force` to main/master, `git reset --hard` on main/master |
+| Secrets | Write to `.env`, `credentials`, `*.key`/`*_key.pem` files |
+
+**Soft blocks (user confirmation prompt):**
+
+| Category | What's prompted |
+|----------|----------------|
+| AWS pipeline launch | `nextflow run ... -profile aws` |
+
+To override a hard block, the user must edit `guardrails.sh` directly.
