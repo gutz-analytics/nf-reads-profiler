@@ -233,12 +233,46 @@ Then disable/re-enable CEs so new workers get the updated launch template.
     - .claude/settings.json (new, hooks config)
     - CLAUDE.md: added guardrails documentation
 
+  e791148 Add session log: ECS race condition diagnosis + guardrails setup
+    - logs/2026-04-26-infra-debug-guardrails.log (new)
+
+  609199b Update smoke-test log: root cause + fix deployed for run #6
+    - logs/smoke-test.log: appended root cause analysis, deployment record,
+      confirmed infra ready for run #6
+
 ================================================================================
-6. NEXT STEPS
+6. CFN DEPLOYMENT (completed in-session)
 ================================================================================
 
-  1. Deploy the CFN stack to pick up the UserData fix (use /deploy-stack)
-  2. Run /preflight to verify infrastructure health
-  3. Re-run the smoke test (infra/smoke-test.sh) to confirm HUMAnN works
+  Stack deployed successfully:
+    aws cloudformation deploy --stack-name nf-reads-profiler-batch ...
+    Launch template bumped to v10 — UserData confirmed:
+      line 16: systemctl stop ecs
+      line 35: s3 sync
+      line 39: systemctl start ecs
+
+  CE state-cycle completed:
+    SpotComputeEnvironment-Eyi8eJp5FEi4DwVk    ENABLED / VALID
+    OnDemandComputeEnvironme-BlIl26JdB3ef8RMS   ENABLED / VALID
+
+  Infrastructure ready for smoke test run #6.
+
+================================================================================
+7. ADDITIONAL CHANGES
+================================================================================
+
+  .claude/skills/caveman.md (new)
+    Ultra-compressed communication mode skill. Invoke with /caveman.
+    Drops articles, filler, pleasantries — keeps technical accuracy.
+    Off with "stop caveman" or "normal mode".
+
+================================================================================
+8. NEXT STEPS
+================================================================================
+
+  1. [DONE] Deploy the CFN stack to pick up the UserData fix
+  2. [DONE] Re-validate CEs (disable/enable cycle)
+  3. Run smoke test #6 — first run with the stop-ecs fix
   4. Complete manual verification: I03 (budgets/tags), I04 (alarms/logtail)
   5. Once smoke test passes: I09 (pilot run)
+  6. Commit .claude/skills/caveman.md
