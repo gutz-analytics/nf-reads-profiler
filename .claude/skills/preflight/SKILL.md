@@ -29,10 +29,12 @@ aws batch describe-job-queues \
   --query "jobQueues[0].{State:state,Status:status}"
 ```
 
-### 3. Launch template has stop-ecs guard
+### 3. Launch template UserData is correct
 
-Decode the launch template UserData and confirm `systemctl stop ecs` appears
-before the `s3 sync` line:
+Decode the launch template UserData and verify it contains the expected
+content. Currently this is the S3 sync with `systemctl stop ecs` guard;
+after the custom AMI migration (`issues/I14-custom-ami-worker.md`) it will
+be a minimal health check verifying `/mnt/dbs/` directories exist.
 
 ```bash
 aws ec2 describe-launch-template-versions \
@@ -40,10 +42,12 @@ aws ec2 describe-launch-template-versions \
   --region us-east-2 \
   --versions '$Latest' \
   --query 'LaunchTemplateVersions[0].LaunchTemplateData.UserData' \
-  --output text | base64 -d | grep -n 'systemctl\|s3 sync'
+  --output text | base64 -d | grep -n 'systemctl\|s3 sync\|mnt/dbs'
 ```
 
-Expected: `stop ecs` before `s3 sync`, `start ecs` after.
+Also verify the Batch-managed launch templates have picked up the latest
+UserData (Batch snapshots at CE create/update time — stale managed templates
+are a known issue, see `logs/2026-04-26-launch-template-propagation-fix.log`).
 
 ### 4. S3 buckets are reachable
 

@@ -1,10 +1,33 @@
 # ADR-001: Database Placement Strategy for AWS Batch Workers
 
-**Status:** Accepted
+**Status:** Superseded (2026-04-26)
 
 **Date:** 2026-04-25
 
 **Deciders:** Infrastructure Team
+
+---
+
+## Superseded — 2026-04-26
+
+The 2-minute sync assumption proved wrong: actual sync time is 20+ minutes for
+65 GiB / 30k objects on fresh Graviton spot instances. This exceeds the
+10-minute reevaluation threshold stated in the Notes section below.
+
+**New decision:** Pre-baked custom AMI (Packer) with databases + Miniconda/awscli
+installed at image build time. Workers register with ECS in seconds instead of
+waiting 20+ minutes for an S3 sync. See `issues/I14-custom-ami-worker.md` for
+the full discussion (AMI vs EFS tradeoffs) and implementation plan.
+
+**What stays the same:** Local gp3 SSD for I/O performance (the core rationale
+of this ADR). `/mnt/dbs/` paths. `/opt/conda-aws/bin/aws` path. The bind mount
+`['/mnt/dbs:/mnt/dbs']` in `conf/aws_batch.config`.
+
+**What changes:** Boot-time S3 sync eliminated. UserData reduced to a health
+check. AMI ID stored in SSM Parameter Store. AMI must be rebuilt (~30 min,
+automated) when databases are updated (a few times per year).
+
+---
 
 ---
 

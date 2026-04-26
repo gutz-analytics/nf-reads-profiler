@@ -86,10 +86,13 @@ All profiles expect pre-staged databases; nothing is downloaded at runtime.
 Paths differ per profile:
 - Local / `test`: `/home/ubuntu/disk_dbs/...` (bind-mounted into Docker via
   `docker.runOptions` in `nextflow.config`).
-- AWS: `/mnt/dbs/...` — populated by an EC2 Launch Template `aws s3 sync` into
-  worker-local storage; see `infra/readme.md`. The UserData stops the ECS
-  agent before syncing and starts it after, so workers only accept jobs once
-  all databases (~65 GiB) are present.
+- AWS: `/mnt/dbs/...` — currently populated by an EC2 Launch Template
+  `aws s3 sync` at boot (~20 min for 30k objects). Being migrated to a
+  pre-baked custom AMI (Packer) that eliminates the boot-time sync entirely.
+  See `issues/I14-custom-ami-worker.md` and `infra/adr-001-db-placement.md`
+  (superseded). The UserData stops the ECS agent before syncing and starts
+  it after, so workers only accept jobs once all databases (~65 GiB) are
+  present.
 
 `README.md` has the `docker run ... humann_databases --download` commands for
 rebuilding HUMAnN4/MetaPhlAn DBs when versions bump.
@@ -169,7 +172,7 @@ converts MEDI CSV outputs.
 - `deploy-stack` — validates the CloudFormation template, deploys, waits, and
   re-validates compute environments. Always shows the diff first.
 - `preflight` — pre-flight checklist before a pipeline run: CEs valid, queue
-  enabled, launch template has stop-ecs guard, S3 reachable, no stuck jobs.
+  enabled, launch template UserData correct, S3 reachable, no stuck jobs.
 
 ## Debugging AWS Batch failures
 
@@ -181,12 +184,14 @@ When a pipeline run fails on AWS Batch, the diagnosis workflow is:
    `/aws/batch/job` (log stream names follow
    `<job-def>/default/<job-id>`). The last few lines usually have the root
    cause.
-3. **Check worker state** — if the error is a missing file/DB, the S3 sync
-   may not have completed. SSH to the worker (if still running) and check
-   `/var/log/nf-userdata.log` and `ls /mnt/dbs/`.
+3. **Check worker state** — if the error is a missing file/DB, the database
+   may not be present. Currently this means the S3 sync didn't complete;
+   after the custom AMI migration (see `issues/I14-custom-ami-worker.md`),
+   it means the wrong AMI was used. SSH to the worker (if still running)
+   and check `/var/log/nf-userdata.log` and `ls /mnt/dbs/`.
 4. **Common failure modes**:
-   - "database does not exist" → S3 sync race (see `infra/readme.md`
-     troubleshooting).
+   - "database does not exist" → S3 sync race or wrong AMI (see
+     `infra/readme.md` troubleshooting and `issues/I14-custom-ami-worker.md`).
    - "Essential container in task exited" → container OOM or command error;
      check CloudWatch logs for the specific error.
    - "Job killed by NF" → Nextflow aborted the run after a different task

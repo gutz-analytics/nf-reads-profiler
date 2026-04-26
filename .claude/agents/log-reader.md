@@ -1,3 +1,8 @@
+---
+name: log-reader
+description: Parse Nextflow logs and fetch CloudWatch logs for failed Batch jobs to produce a concise run report
+---
+
 # Nextflow + Batch log reader agent
 
 You read Nextflow logs and AWS Batch CloudWatch logs for the `nf-reads-profiler`

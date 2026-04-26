@@ -139,3 +139,61 @@ Discovery chain:
 
   A simple disable/re-enable cycle is NOT sufficient. The explicit
   update-compute-environment call with compute-resources is required.
+
+================================================================================
+9. SMOKE TEST #7 — IN PROGRESS / S3 SYNC PERFORMANCE PROBLEM
+================================================================================
+
+  Smoke test #7 launched at ~16:48 UTC with both fixes deployed (rev-4
+  managed templates: ECS stop guard + narrowed S3 include filters).
+
+  Pipeline submitted 3 jobs (2x AWS_DOWNLOAD, 1x get_software_versions).
+  A fresh r8g.2xlarge spot worker (i-00f55b99ca3876c11) provisioned, but
+  after 20+ minutes all 3 jobs were still RUNNABLE — the worker was still
+  syncing 65 GiB / 30k objects from S3 before ECS could start.
+
+  Problem: spot instances are idling (and costing money) for 20+ minutes
+  just copying database files before doing any useful work. The S3 sync
+  of 30k small files is inherently slow regardless of include filters.
+
+  Decision: switch to a custom AMI with databases pre-baked. This
+  eliminates boot-time sync entirely — workers come online and start
+  processing immediately.
+
+================================================================================
+10. AMI vs EFS DECISION
+================================================================================
+
+  Brainstormed two alternatives to the S3 sync:
+
+  Custom AMI (pre-baked databases) — CHOSEN
+    Pros: fastest boot (seconds), best read perf (local SSD), no ongoing infra,
+          no throughput charges, automated Packer build
+    Cons: must rebuild AMI (~30 min) on DB version bumps (few times/year),
+          region-specific, snapshot cost (~$3.75/mo)
+
+  EFS (shared NFS filesystem) — REJECTED
+    Pros: no AMI rebuilds, instant mount, update DBs in one place
+    Cons: NFS latency kills Bowtie2/DIAMOND random-seek performance (same
+          reason ADR-001 rejected it), throughput costs at scale, monthly cost
+          even when idle
+
+  Key factor: databases change only a few times per year, so AMI rebuild
+  overhead is negligible. The I/O performance advantage of local SSD is
+  preserved (core rationale from ADR-001).
+
+  Created: issues/I14-custom-ami-worker.md
+  Updated: infra/adr-001-db-placement.md (status → Superseded)
+
+================================================================================
+11. OPEN ITEMS (UPDATED)
+================================================================================
+
+  - [pending] Smoke test #7 still running — waiting for DB sync to complete
+  - [done] Narrowed S3 sync to explicit --include (committed 1c9c420)
+  - [done] Forced CE update to propagate launch template (rev-4 confirmed)
+  - [done] AMI vs EFS decision documented (issues/I14-custom-ami-worker.md)
+  - [done] ADR-001 superseded, docs/agents/skills updated
+  - [next] Implement custom AMI: Packer template, build script, CFN update
+  - [ ] Fix duplicated UserData in nf-reads-profiler-worker v10 source template
+  - [ ] Investigate "user value contains invalid characters" errors from earlier runs

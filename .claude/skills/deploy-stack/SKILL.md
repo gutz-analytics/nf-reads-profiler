@@ -53,24 +53,29 @@ aws cloudformation wait stack-update-complete \
   --region us-east-2
 ```
 
-### 4. Re-validate compute environments (disable/re-enable)
+### 4. Force compute environments to pick up the new launch template
+
+**Important:** A simple disable/re-enable does NOT force Batch to re-snapshot
+the launch template UserData. You must explicitly update the CEs with the
+launch template reference and `updateToLatestImageVersion`.
 
 ```bash
+LT_ID=$(aws ec2 describe-launch-templates --region us-east-2 \
+  --filters "Name=launch-template-name,Values=nf-reads-profiler-worker" \
+  --query 'LaunchTemplates[0].LaunchTemplateId' --output text)
+
 CE_SPOT=$(aws batch describe-job-queues --job-queues spot-queue --region us-east-2 \
   --query "jobQueues[0].computeEnvironmentOrder[0].computeEnvironment" --output text)
 CE_ONDEMAND=$(aws batch describe-job-queues --job-queues spot-queue --region us-east-2 \
   --query "jobQueues[0].computeEnvironmentOrder[1].computeEnvironment" --output text)
 
-aws batch update-compute-environment --compute-environment $CE_SPOT --state DISABLED --region us-east-2
-aws batch update-compute-environment --compute-environment $CE_ONDEMAND --state DISABLED --region us-east-2
+aws batch update-compute-environment --compute-environment $CE_SPOT --region us-east-2 \
+  --compute-resources "{\"launchTemplate\":{\"launchTemplateId\":\"$LT_ID\",\"version\":\"\$Latest\"},\"updateToLatestImageVersion\":true}"
+aws batch update-compute-environment --compute-environment $CE_ONDEMAND --region us-east-2 \
+  --compute-resources "{\"launchTemplate\":{\"launchTemplateId\":\"$LT_ID\",\"version\":\"\$Latest\"},\"updateToLatestImageVersion\":true}"
 ```
 
-Wait 30 seconds, then re-enable:
-
-```bash
-aws batch update-compute-environment --compute-environment $CE_SPOT --state ENABLED --region us-east-2
-aws batch update-compute-environment --compute-environment $CE_ONDEMAND --state ENABLED --region us-east-2
-```
+Wait for both CEs to become VALID before proceeding.
 
 ### 5. Confirm both are VALID
 

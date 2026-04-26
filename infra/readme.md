@@ -97,18 +97,20 @@ S3: s3://gutz-nf-reads-profilers-runs  ← input + results    — DeletionPolicy
 
 ---
 
-### Database placement (S3-sync to worker-local EBS)
+### Database placement (worker-local EBS)
 
-Databases (~65 GiB, ~30k objects) are synced from S3 to each worker's local
-EBS at boot via the Launch Template `UserData` script. This avoids the
-complexity and cost of EFS/FSx while keeping read performance high. See
-[ADR-001](adr-001-db-placement.md) for the full rationale and alternatives
-considered.
+Databases (~65 GiB) live on each worker's local 500 GiB gp3 EBS volume at
+`/mnt/dbs/`. This keeps read performance high for random-seek tools (Bowtie2,
+DIAMOND). Database paths in `conf/aws_batch.config` point to `/mnt/dbs/...`.
 
-The UserData script stops the ECS agent before syncing and starts it
-afterward, so no Batch jobs are scheduled to the worker until all databases
-are present under `/mnt/dbs/`. Database paths in `conf/aws_batch.config`
-point to `/mnt/dbs/...`.
+**Current state (S3 sync at boot):** The Launch Template UserData syncs
+databases from S3 at boot. This takes 20+ minutes for 30k objects and is being
+replaced. See [ADR-001](adr-001-db-placement.md) (now superseded).
+
+**Planned: Custom AMI with pre-baked databases.** Databases and Miniconda/awscli
+will be baked into a custom AMI built with Packer, eliminating the boot-time
+sync entirely. Workers will register with ECS in seconds. See
+`issues/I14-custom-ami-worker.md` for the full plan.
 
 ---
 
