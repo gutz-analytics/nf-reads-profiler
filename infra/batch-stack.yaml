@@ -80,21 +80,19 @@ Parameters:
   EcsAmiId:
     Type: AWS::EC2::Image::Id
     Description: >
-      ECS-optimized AMI for Batch workers. Must be Amazon Linux 2023 ARM64
-      (Graviton). AL2 is avoided because its glibc 2.26 is too old for modern
-      Miniconda (needs >=2.28). Look up the current AMI with:
-        aws ec2 describe-images --region us-east-2 --owners amazon \
-          --filters "Name=name,Values=al2023-ami-ecs-hvm-*-kernel-*-arm64" \
-                    "Name=state,Values=available" \
-          --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' --output text
+      Custom pre-baked AMI for Batch workers. Built by infra/packer/build-ami.sh
+      from the AL2023 ECS-optimized ARM64 base, with databases (~65 GiB) and
+      Miniconda/awscli pre-installed at /mnt/dbs/ and /opt/conda-aws/.
+      Look up the current AMI with:
+        aws ssm get-parameter --name /nf-reads-profiler/ami-id --region us-east-2 --query 'Parameter.Value' --output text
 
   DbSourceBucket:
     Type: String
     Default: cjb-gutz-s3-demo
     Description: >
-      S3 bucket that holds the pre-staged metaomics databases (MetaPhlAn,
-      HUMAnN4, ChocoPhlAn, UniRef). Workers sync this bucket to /mnt/dbs
-      at startup via the BatchWorkerLaunchTemplate UserData.
+      S3 bucket that holds the metaomics databases (MetaPhlAn, HUMAnN4,
+      ChocoPhlAn, UniRef). Databases are pre-baked into the custom AMI;
+      this parameter is used only for IAM policy permissions.
       The EcsInstanceRole is granted read-only access to this bucket.
       This bucket is NOT created or deleted by this stack.
 
@@ -372,19 +370,18 @@ Resources:
           Value: !Ref EnvironmentTag
 
 # ---------------------------------------------------------------------------
-# Launch Template — installs AWS CLI via Miniconda on every worker node at boot
+# Launch Template — pre-baked custom AMI with databases + Miniconda/awscli
 # ---------------------------------------------------------------------------
+# The AMI is built by infra/packer/build-ami.sh and contains:
+#   /opt/conda-aws/bin/aws  — Miniconda + awscli (Nextflow's cliPath)
+#   /mnt/dbs/               — all four reference databases (~65 GiB)
+#
 # Nextflow mounts the GRANDPARENT directory of aws.batch.cliPath from the host
 # into each Batch container at the same path. For cliPath '/opt/conda-aws/bin/aws'
-# that means /opt/conda-aws/ is bind-mounted in. The install therefore needs to
-# be fully self-contained under that directory (binary + Python interpreter +
-# site-packages + shared libs), which is exactly what a Miniconda install gives.
+# that means /opt/conda-aws/ is bind-mounted in.
 #
-# /opt/conda-aws was chosen because it does not exist in any of the pipeline's
-# container images (multiqc, humann, metaphlan, fastp, sra-tools). Mounting a
-# host dir with the same path as a container dir *shadows* the container's
-# version — see the Seqera docs warning — so we pick a path that is guaranteed
-# not to collide.
+# UserData is a minimal health check — no S3 sync or software installation.
+# Workers register with ECS immediately at boot.
 
   BatchWorkerLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
@@ -404,57 +401,41 @@ Resources:
               DeleteOnTermination: true
               Encrypted: true
         UserData:
-          Fn::Base64:
-            Fn::Sub: |
-              MIME-Version: 1.0
-              Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+          Fn::Base64: !Sub |
+            MIME-Version: 1.0
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
 
-              --==BOUNDARY==
-              Content-Type: text/x-shellscript; charset="us-ascii"
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
 
-              #!/bin/bash
-              # Log everything to /var/log/nf-userdata.log for SSH-based debugging.
-              exec > >(tee -a /var/log/nf-userdata.log) 2>&1
-              set -x
-              echo "=== nf-reads-profiler user data starting at $(date) ==="
+            #!/bin/bash
+            exec > >(tee -a /var/log/nf-userdata.log) 2>&1
+            set -x
+            echo "=== nf-reads-profiler worker boot at $(date) ==="
 
-              # The ECS agent auto-starts on the ECS-optimized AMI and registers
-              # with Batch immediately. Stop it so no jobs are scheduled before
-              # the DB sync completes (~65 GiB / 30k objects).
-              systemctl stop ecs
-
-              ARCH=$(uname -m)
-              if [ "$ARCH" = "aarch64" ]; then
-                URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
-              else
-                URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+            ERRORS=0
+            for d in chocophlan_v4_alpha full_mapping_v4_alpha metaphlan_databases uniref90_annotated_v4_alpha_ec_filtered; do
+              if [ ! -d "/mnt/dbs/$d" ]; then
+                echo "ERROR: /mnt/dbs/$d missing — wrong AMI?" >&2
+                ERRORS=$((ERRORS + 1))
               fi
+            done
 
-              curl -fsSL "$URL" -o /tmp/miniconda.sh
-              bash /tmp/miniconda.sh -b -f -p /opt/conda-aws
-              rm /tmp/miniconda.sh
-              /opt/conda-aws/bin/conda install -c conda-forge --override-channels -y awscli
-              /opt/conda-aws/bin/aws --version
+            if [ ! -f /opt/conda-aws/bin/aws ]; then
+              echo "ERROR: /opt/conda-aws/bin/aws missing — wrong AMI?" >&2
+              ERRORS=$((ERRORS + 1))
+            fi
 
-              # stage dbs locally
-              mkdir -p /mnt/dbs
+            if [ $ERRORS -gt 0 ]; then
+              echo "FATAL: $ERRORS pre-bake checks failed. Rebuild AMI with infra/packer/build-ami.sh" >&2
+            else
+              echo "OK: all databases and awscli present"
+              cat /mnt/dbs/.ami-build-timestamp 2>/dev/null || true
+            fi
 
-              # Sync only the four required database directories (~65 GiB).
-              # Exclude everything first, then include only what we need.
-              /opt/conda-aws/bin/aws s3 sync s3://${DbSourceBucket} /mnt/dbs/ \
-                  --exclude "*" \
-                  --include "chocophlan_v4_alpha/*" \
-                  --include "full_mapping_v4_alpha/*" \
-                  --include "metaphlan_databases/*" \
-                  --include "uniref90_annotated_v4_alpha_ec_filtered/*" \
-                  --quiet
+            echo "=== nf-reads-profiler worker boot done at $(date) ==="
 
-              # Start ECS now that databases are synced to /mnt/dbs
-              systemctl start ecs
-
-              echo "=== nf-reads-profiler user data done at $(date) ==="
-
-              --==BOUNDARY==--
+            --==BOUNDARY==--
 
 # ---------------------------------------------------------------------------
 # Compute Environments — Graviton (ARM64) only

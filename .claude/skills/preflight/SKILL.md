@@ -29,25 +29,43 @@ aws batch describe-job-queues \
   --query "jobQueues[0].{State:state,Status:status}"
 ```
 
-### 3. Launch template UserData is correct
+### 3. Custom AMI version matches deployed stack
 
-Decode the launch template UserData and verify it contains the expected
-content. Currently this is the S3 sync with `systemctl stop ecs` guard;
-after the custom AMI migration (`issues/I14-custom-ami-worker.md`) it will
-be a minimal health check verifying `/mnt/dbs/` directories exist.
+Workers use a pre-baked custom AMI with databases and awscli. Verify the
+deployed stack is using the latest available AMI.
 
 ```bash
-aws ec2 describe-launch-template-versions \
-  --launch-template-name nf-reads-profiler-worker \
-  --region us-east-2 \
-  --versions '$Latest' \
-  --query 'LaunchTemplateVersions[0].LaunchTemplateData.UserData' \
-  --output text | base64 -d | grep -n 'systemctl\|s3 sync\|mnt/dbs'
+# AMI in the deployed stack
+DEPLOYED_AMI=$(aws cloudformation describe-stacks --stack-name nf-reads-profiler-batch \
+  --region us-east-2 --query 'Stacks[0].Parameters[?ParameterKey==`EcsAmiId`].ParameterValue' --output text)
+
+# Latest available self-owned AMI
+LATEST_AMI=$(aws ec2 describe-images --region us-east-2 --owners self \
+  --filters "Name=name,Values=nf-reads-profiler-worker-*" "Name=state,Values=available" \
+  --query 'Images | sort_by(@,&CreationDate) | [-1].[ImageId,Name,CreationDate]' --output text)
+
+echo "Deployed: $DEPLOYED_AMI"
+echo "Latest:   $LATEST_AMI"
 ```
 
-Also verify the Batch-managed launch templates have picked up the latest
-UserData (Batch snapshots at CE create/update time — stale managed templates
-are a known issue, see `logs/2026-04-26-launch-template-propagation-fix.log`).
+WARN if deployed AMI doesn't match the latest available AMI.
+
+Also verify the Batch-managed launch templates have the same AMI (Batch
+snapshots at CE create/update time — stale managed templates are a known
+issue, see `logs/2026-04-26-launch-template-propagation-fix.log`).
+
+```bash
+for lt in $(aws ec2 describe-launch-templates --region us-east-2 \
+  --filters "Name=launch-template-name,Values=Batch-lt-*" \
+  --query 'LaunchTemplates[*].LaunchTemplateName' --output text); do
+  AMI=$(aws ec2 describe-launch-template-versions --launch-template-name "$lt" \
+    --region us-east-2 --versions '$Latest' \
+    --query 'LaunchTemplateVersions[0].LaunchTemplateData.ImageId' --output text)
+  echo "$lt: $AMI"
+done
+```
+
+All Batch-managed templates must show the same AMI as the deployed stack.
 
 ### 4. S3 buckets are reachable
 

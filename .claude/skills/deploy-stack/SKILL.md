@@ -12,7 +12,28 @@ This skill deploys the CloudFormation stack and re-validates compute environment
 
 ## Steps
 
-### 1. Validate the template
+### 1. Look up the current custom AMI ID
+
+The custom AMI is built by `infra/packer/build-ami.sh` and its ID is stored
+in SSM. If SSM is not accessible from the head node, fall back to querying EC2:
+
+```bash
+# Try SSM first
+AMI_ID=$(aws ssm get-parameter --name /nf-reads-profiler/ami-id --region us-east-2 \
+  --query 'Parameter.Value' --output text 2>/dev/null)
+
+# Fallback: latest self-owned AMI
+if [ -z "$AMI_ID" ] || [ "$AMI_ID" = "None" ]; then
+  AMI_ID=$(aws ec2 describe-images --region us-east-2 --owners self \
+    --filters "Name=name,Values=nf-reads-profiler-worker-*" "Name=state,Values=available" \
+    --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' --output text)
+fi
+echo "AMI: $AMI_ID"
+```
+
+Show the AMI ID to the user for confirmation before proceeding.
+
+### 2. Validate the template
 
 ```bash
 aws cloudformation validate-template \
@@ -22,7 +43,7 @@ aws cloudformation validate-template \
 
 If validation fails, stop and report the error.
 
-### 2. Deploy the stack
+### 3. Deploy the stack
 
 ```bash
 aws cloudformation deploy \
@@ -42,10 +63,11 @@ aws cloudformation deploy \
     MaxvCPUsOnDemand=8 \
     ProjectTag=nf-reads-profiler \
     EnvironmentTag=development \
-    DbSourceBucket=cjb-gutz-s3-demo
+    DbSourceBucket=cjb-gutz-s3-demo \
+    EcsAmiId=$AMI_ID
 ```
 
-### 3. Wait for completion
+### 4. Wait for completion
 
 ```bash
 aws cloudformation wait stack-update-complete \
@@ -53,7 +75,7 @@ aws cloudformation wait stack-update-complete \
   --region us-east-2
 ```
 
-### 4. Force compute environments to pick up the new launch template
+### 5. Force compute environments to pick up the new launch template
 
 **Important:** A simple disable/re-enable does NOT force Batch to re-snapshot
 the launch template UserData. You must explicitly update the CEs with the
@@ -77,7 +99,7 @@ aws batch update-compute-environment --compute-environment $CE_ONDEMAND --region
 
 Wait for both CEs to become VALID before proceeding.
 
-### 5. Confirm both are VALID
+### 6. Confirm both are VALID
 
 ```bash
 aws batch describe-compute-environments \

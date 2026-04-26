@@ -1,0 +1,176 @@
+================================================================================
+Session: Custom AMI for AWS Batch workers — 2026-04-26
+Branch: I14-custom-ami-worker
+================================================================================
+
+## Session goal
+
+Eliminate the 20+ minute S3 sync at worker boot by building a custom AMI with
+databases pre-baked. This is the implementation of I14 (issues/I14-custom-ami-worker.md),
+which supersedes ADR-001's S3-sync approach.
+
+## Prior sessions (same day)
+
+  1. infra-debug-guardrails — diagnosed ChocoPhlAn DB missing (ECS race condition),
+     deployed stop-ecs fix, added agents/skills/guardrails.
+  2. launch-template-propagation-fix — discovered Batch doesn't auto-propagate
+     LT changes, forced CE update, ran smoke tests #6-#7 (both failed: #6 had
+     stale LT, #7 timed out during 20-min S3 sync). Decision: custom AMI.
+
+================================================================================
+1. AMI BUILD — COMPLETED
+================================================================================
+
+  Built: ami-0b87926a60df7043e
+  Name: nf-reads-profiler-worker-1777228683
+  Date: 2026-04-26T18:48:31Z
+  State: available
+
+  Build process:
+  - Packer template: infra/packer/worker-ami.pkr.hcl
+  - Build script: infra/packer/build-ami.sh
+  - Source: AL2023 ECS-optimized ARM64 (latest)
+  - Instance: r8g.2xlarge (matches production workers)
+  - Volume: 500 GiB gp3 encrypted
+  - Provisioners:
+    1. Miniconda + awscli installed to /opt/conda-aws
+    2. S3 sync of 4 DB dirs (~65 GiB) to /mnt/dbs/
+    3. Validation: all 4 dirs have files, awscli works
+    4. Cleanup: tmp files, timestamp stamped
+
+  No packer-manifest.json found on disk (may have been cleaned up or build
+  was run from a different path). AMI confirmed available via EC2 describe-images.
+
+================================================================================
+2. BATCH-STACK.YAML CHANGES — STAGED (NOT YET DEPLOYED)
+================================================================================
+
+  Modified infra/batch-stack.yaml (uncommitted on I14-custom-ami-worker branch):
+
+  a) EcsAmiId parameter description: updated to reference custom AMI and SSM
+     lookup instead of stock AL2023 AMI lookup command.
+
+  b) DbSourceBucket parameter description: clarified that it's now used only
+     for IAM policy permissions, not for boot-time sync.
+
+  c) Launch template comments: simplified to reflect pre-baked AMI approach.
+
+  d) UserData: replaced the entire S3-sync + Miniconda-install script with a
+     minimal health check that:
+     - Verifies all 4 DB directories exist at /mnt/dbs/
+     - Verifies /opt/conda-aws/bin/aws exists
+     - Logs errors if anything is missing ("wrong AMI?")
+     - No systemctl stop/start ecs (databases already present)
+
+  Currently deployed stack still uses: ami-02d671abb319baa35 (stock AL2023)
+  Launch template version: v11
+
+================================================================================
+3. SSM PARAMETER — BLOCKED (head-node IAM)
+================================================================================
+
+  The head-node-role does not have ssm:PutParameter permission.
+  /nf-reads-profiler/ami-id is not yet stored in SSM.
+
+  Workaround: the /deploy-stack skill falls back to querying EC2 for the
+  latest self-owned nf-reads-profiler-worker-* AMI. The /preflight skill
+  compares the deployed stack's EcsAmiId against the latest available AMI.
+
+  To fix permanently: add ssm:PutParameter to head-node-role, or run
+  build-ami.sh from a machine with SSM write access.
+
+================================================================================
+4. CLOUDFORMATION DEPLOY — COMPLETED
+================================================================================
+
+  Deployed stack with custom AMI:
+    EcsAmiId=ami-0b87926a60df7043e (was ami-02d671abb319baa35, stock AL2023)
+
+  Launch template bumped to v12. UserData confirmed: health check only,
+  no S3 sync, no Miniconda install.
+
+  All 4 Batch-managed templates re-minted at rev-5:
+    Batch-lt-52a7fe65-...-rev-5  AMI=ami-0b87926a60df7043e  health_check=yes
+    Batch-lt-e6beaf02-...-rev-5  AMI=ami-0b87926a60df7043e  health_check=yes
+    Batch-lt-1c8bf6c4-...-rev-5  AMI=ami-0b87926a60df7043e  health_check=yes
+    Batch-lt-a84e9159-...-rev-5  AMI=ami-0b87926a60df7043e  health_check=yes
+
+================================================================================
+5. CE STATUS — BOTH VALID
+================================================================================
+
+  SpotComputeEnvironment-Eyi8eJp5FEi4DwVk:    ENABLED / VALID
+  OnDemandComputeEnvironme-BlIl26JdB3ef8RMS:   ENABLED / VALID
+
+  Spot CE recovered from INVALID after the CFN deploy propagated the
+  custom AMI. No manual update-compute-environment was needed this time —
+  the CFN update itself triggered the re-mint.
+
+================================================================================
+6. SKILL UPDATES — COMPLETED
+================================================================================
+
+  /deploy-stack (SKILL.md):
+    - Added step 1: look up custom AMI from SSM (with EC2 fallback)
+    - EcsAmiId now included in deploy parameters
+    - Steps renumbered
+
+  /preflight (SKILL.md):
+    - Replaced "Launch template UserData" check with "Custom AMI version"
+    - Compares deployed stack AMI vs latest self-owned AMI
+    - Verifies Batch-managed templates match
+
+================================================================================
+7. SMOKE TEST #8 — PARTIAL SUCCESS (spot termination)
+================================================================================
+
+  Project: smoke-20260426-224020
+  Started: 22:40:23 UTC
+
+  Pre-flight: all passed (spot-queue ENABLED, 2 CEs VALID, S3 accessible)
+
+  Pipeline progress:
+    AWS_DOWNLOAD     2/2  completed
+    FASTERQ_DUMP     2/2  completed
+    count_reads      2/2  completed
+    clean_reads      2/2  completed
+    get_software_versions  1/1  completed
+    profile_taxa     0/2  running when aborted
+    profile_function 0/2  running when aborted
+
+  Failure: profile_function (SRR6664342) — "Host EC2 (instance
+  i-018922efc40d62510) terminated." This is a spot instance reclamation,
+  NOT a database or AMI issue.
+
+  Instance details:
+    Type: m8g.4xlarge (Batch chose this from the allowed instance types)
+    AMI:  ami-0b87926a60df7043e (custom AMI — correct!)
+    Launch: 22:41:49 UTC
+    Terminated: 22:51:18 UTC (Service initiated — spot reclamation)
+    Worker active time: ~10 min
+
+  Key validation: worker booted and started processing in ~1 minute
+  (vs 20+ minutes with S3 sync). No "ChocoPhlAn database does not exist"
+  error. HUMAnN was actively running for ~6 minutes before spot reclamation.
+
+  The custom AMI eliminated the boot-time sync problem. The spot termination
+  is normal operational risk — production runs use `-resume` to recover.
+
+================================================================================
+8. OPEN ITEMS
+================================================================================
+
+  - [done] AMI built: ami-0b87926a60df7043e (Packer, arm64, 500 GiB)
+  - [done] Packer template: infra/packer/worker-ami.pkr.hcl
+  - [done] Build script: infra/packer/build-ami.sh
+  - [done] batch-stack.yaml updated: simplified UserData, updated comments
+  - [done] ADR-001 superseded, I14 issue created
+  - [done] Deploy CloudFormation stack with EcsAmiId=ami-0b87926a60df7043e
+  - [done] Both CEs VALID after deploy
+  - [done] All 4 Batch-managed templates confirmed with custom AMI
+  - [done] /deploy-stack skill updated with AMI lookup
+  - [done] /preflight skill updated with AMI version check
+  - [done] Smoke test: custom AMI works (databases present, fast boot)
+  - [blocked] Store AMI ID in SSM — head-node lacks ssm:PutParameter
+  - [ ] Full end-to-end smoke test pass (re-run; spot termination was bad luck)
+  - [ ] Commit all changes on I14-custom-ami-worker branch
