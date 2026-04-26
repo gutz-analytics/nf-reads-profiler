@@ -1,0 +1,244 @@
+================================================================================
+Session: Infra debugging + guardrails — 2026-04-26
+Branch: ongoing-infra
+================================================================================
+
+## Session goal
+
+Catch up on outstanding errors from recent pipeline runs, fix the root cause,
+and add Claude Code agents/skills/guardrails.
+
+================================================================================
+1. STATUS CHECK — Where we left off
+================================================================================
+
+The monkey-paw implementation plan was fully approved (plan, architecture, docs,
+tests stages all approved). Implementation was in-progress: all 8 PRs (I00–I10)
+had been merged into ongoing-infra. Last commit was I05 smoke test.
+
+Branches merged into ongoing-infra:
+  - I00-fix-containerOptions
+  - I01-parameterize-db-bucket
+  - I02-readme-hygiene
+  - I06-job-policy-memory
+  - I07-db-placement-adr
+  - I08-storage-lifecycle
+  - I10-production-playbook
+  - tests-infra
+
+Outstanding manual items (no code changes):
+  - I03: Verify budgets/tags — manual AWS console verification
+  - I04: Verify alarms/logtail �� manual alarm testing
+  - I05: Smoke test — script written, can't pass until pipeline works
+  - I09: Pilot run — blocked on smoke test
+
+Future work (not started):
+  - I11: Human read removal
+  - I12: Local reduce steps
+  - I13: MEDI unmapped reads
+
+================================================================================
+2. ROOT CAUSE ANALYSIS — ChocoPhlAn DB missing on workers
+================================================================================
+
+### Symptom
+
+All recent pipeline runs (5+ attempts on 2026-04-26, between 02:58–03:57 UTC)
+failed at `profile_function` (HUMAnN4) with:
+
+  CRITICAL ERROR: The directory provided for the ChocoPhlAn database at
+  /mnt/dbs/chocophlan_v4_alpha/ does not exist.
+
+Everything upstream succeeded: AWS_DOWNLOAD, FASTERQ_DUMP, count_reads,
+clean_reads all completed in seconds. MetaPhlAn (profile_taxa) was either
+killed by NF (pipeline abort after HUMAnN failure) or ran successfully
+(its DB was present).
+
+### Samples used
+
+  SRR6664374, SRR6664342 (CHILD cohort, from samplesheet-smoke-child.csv)
+
+### Failed Batch jobs (from CloudWatch /aws/batch/job)
+
+  nf-barbarahelena-humann-4-0-3/default/6092d433... → exit 1, 6s
+    "ChocoPhlAn database at /mnt/dbs/chocophlan_v4_alpha/ does not exist"
+
+  nf-barbarahelena-humann-4-0-3/default/97c7493b... → exit 1, 6s
+    Same error.
+
+### Timeline of most recent run (03:52–03:57 UTC)
+
+  03:52:39  get_software_versions submitted
+  03:53:01  get_software_versions started (22s to start → worker pre-warmed)
+  03:54:23  AWS_DOWNLOAD SRR6664374 started
+  03:55:58  profile_function SRR6664342 submitted
+  03:57:03  profile_function SRR6664342 started → FAILED in 6s
+  03:57:08  Pipeline aborted, 3 tasks killed
+
+### Root cause: ECS agent race condition
+
+The Launch Template UserData does:
+  1. Install miniconda (~3-5 min)
+  2. Install awscli via conda (~1-3 min)
+  3. S3 sync ~65 GiB / 30,124 objects from s3://cjb-gutz-s3-demo → /mnt/dbs/
+  4. systemctl restart ecs
+
+But on the AL2023 ECS-optimized AMI, the ECS agent starts automatically on
+boot via systemd. It registers with the Batch cluster BEFORE the UserData
+script runs (cloud-init final stage runs after services start). So:
+
+  Boot → ECS agent starts → registers with Batch → JOBS ARRIVE
+    ... meanwhile ...
+  cloud-init final → UserData starts → miniconda install → S3 sync (15-60 min)
+    → systemctl restart ecs (too late)
+
+The S3 sync order explains why MetaPhlAn worked but HUMAnN didn't:
+  - metaphlan_databases/: 9 files, 19.2 GiB → syncs fast
+  - chocophlan_v4_alpha/: 30,094 files, 41.7 GiB → syncs last
+
+### DB sizes in s3://cjb-gutz-s3-demo/
+
+  metaphlan_databases/                    9 files    19.2 GiB
+  chocophlan_v4_alpha/                30,094 files   41.7 GiB
+  uniref90_annotated_v4_alpha.../         1 file      1.6 GiB
+  full_mapping_v4_alpha/                 20 files     2.7 GiB
+  Total (excl referencedata):       ~30,124 files   ~65.2 GiB
+
+### Infrastructure state checked
+
+  Stack: nf-reads-profiler-batch — deployed, parameters correct
+  CEs: SpotComputeEnvironment (ENABLED/VALID), OnDemandComputeEnvironment (ENABLED/VALID)
+  Launch template: lt-0d9193dd0f66d68ee — correct AMI (ami-02d671abb319baa35,
+    al2023-ami-ecs-hvm-2023.0.20260414-kernel-6.1-arm64), correct UserData
+  EcsInstanceRole: S3 access to cjb-gutz-s3-demo confirmed in IAM policy
+  Instance profile: nf-reads-profiler-ecs-instance-profile attached to both CEs
+  Running instances: 1 (i-0c85d6ecbdb08bac8) — this is the HEAD NODE (runner VM),
+    not a Batch worker. Uses head-node-role, stock Ubuntu 24.04 AMI. No SSM agent.
+
+================================================================================
+3. FIX — Stop ECS before sync, start after
+================================================================================
+
+### Change: infra/batch-stack.yaml UserData
+
+Before:
+  #!/bin/bash
+  ...
+  aws s3 sync s3://${DbSourceBucket} /mnt/dbs/ --exclude "referencedata/*" --quiet
+  systemctl restart ecs
+
+After:
+  #!/bin/bash
+  ...
+  systemctl stop ecs      # ← NEW: prevent jobs before sync
+  ...
+  aws s3 sync s3://${DbSourceBucket} /mnt/dbs/ --exclude "referencedata/*" --quiet
+  systemctl start ecs     # ← CHANGED: start (not restart)
+
+### Change: infra/readme.md
+
+  - Updated "Database placement" section with accurate sizes (65 GiB, 30k objects)
+    and documented the stop/start ECS pattern.
+  - Added troubleshooting entry: "Fix: HUMAnN ChocoPhlAn database does not exist"
+    with symptom, cause, fix, and verification steps.
+
+### Change: CLAUDE.md
+
+  - Fixed stale nreads value (33,333,333 → 32,000,000)
+  - Replaced outdated EFS note with stop/start ECS description
+  - Added debugging workflow section
+
+### Deployment required
+
+Stack must be redeployed to pick up the UserData change:
+  aws cloudformation deploy ... (see infra/readme.md or /deploy-stack skill)
+Then disable/re-enable CEs so new workers get the updated launch template.
+
+================================================================================
+4. CLAUDE CODE TOOLING — Agents, skills, guardrails
+================================================================================
+
+### Agents created (.claude/agents/)
+
+  batch-doctor.md
+    Read-only health check of full Batch stack. Checks CEs, queue, recent
+    failures, launch template UserData, S3 buckets, running instances,
+    Nextflow logs. Outputs a status table with WARN/FAIL callouts.
+
+  log-reader.md
+    Parses .nextflow.log* files and fetches CloudWatch logs for failed Batch
+    jobs. Produces a concise run report: succeeded/failed/aborted, timing,
+    error messages.
+
+### Skills created (.claude/skills/)
+
+  deploy-stack.md
+    Validates CFN template, deploys stack with all correct parameters, waits
+    for completion, disables/re-enables CEs to re-validate. Shows diff first.
+
+  preflight.md
+    Pre-flight checklist before pipeline runs: CEs valid, queue enabled,
+    launch template has stop-ecs guard, S3 reachable, no stuck jobs.
+
+### Guardrails hook (.claude/hooks/guardrails.sh)
+
+  PreToolUse hook configured in .claude/settings.json. Fires before every
+  Bash, Write, and Edit call.
+
+  Hard blocks (exit 2):
+    - docker compose down -v, docker volume rm/prune, docker system prune
+    - aws ec2 run-instances, aws ec2 request-spot-instances
+    - aws batch update-compute-environment with maxvCpus > 64
+    - aws cloudformation delete-stack
+    - dd if=, fallocate, mkfs
+    - rm -r outside the repo
+    - git push --force to main/master, git reset --hard on main/master
+    - Write to .env, credentials, *.key files
+    - Write/Edit to paths outside repo (except ~/.claude/)
+
+  Soft blocks (confirmation prompt):
+    - nextflow run ... -profile aws
+
+  Tested against 14 scenarios — all pass:
+    docker compose down -v       → BLOCKED
+    ls -la                       → allowed
+    write /etc/passwd            ��� BLOCKED
+    nextflow run -profile aws    → soft ask (permissionDecision: "ask")
+    docker volume prune          → BLOCKED
+    ec2 run-instances            → BLOCKED
+    maxvCpus=256                 → BLOCKED
+    maxvCpus=16                  → allowed
+    cloudformation delete-stack  → BLOCKED
+    git push --force main        → BLOCKED
+    rm -rf /home/ubuntu/disk_dbs → BLOCKED
+    rm -rf work/                 → allowed (inside repo)
+    edit main.nf                 → allowed (inside repo)
+    write .env                   → BLOCKED
+
+================================================================================
+5. COMMITS
+================================================================================
+
+  e6aea80 Fix ECS/S3-sync race condition and add Claude Code agents and skills
+    - infra/batch-stack.yaml: stop ecs before sync, start after
+    - infra/readme.md: updated DB placement docs + troubleshooting entry
+    - CLAUDE.md: fixed nreads, EFS note, added agents/skills/debugging sections
+    - .claude/agents/batch-doctor.md (new)
+    - .claude/agents/log-reader.md (new)
+    - .claude/skills/deploy-stack.md (new)
+    - .claude/skills/preflight.md (new)
+
+  e552d43 Add PreToolUse guardrails hook to block destructive operations
+    - .claude/hooks/guardrails.sh (new, executable)
+    - .claude/settings.json (new, hooks config)
+    - CLAUDE.md: added guardrails documentation
+
+================================================================================
+6. NEXT STEPS
+================================================================================
+
+  1. Deploy the CFN stack to pick up the UserData fix (use /deploy-stack)
+  2. Run /preflight to verify infrastructure health
+  3. Re-run the smoke test (infra/smoke-test.sh) to confirm HUMAnN works
+  4. Complete manual verification: I03 (budgets/tags), I04 (alarms/logtail)
+  5. Once smoke test passes: I09 (pilot run)
