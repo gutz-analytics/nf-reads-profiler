@@ -99,14 +99,16 @@ S3: s3://gutz-nf-reads-profilers-runs  ← input + results    — DeletionPolicy
 
 ### Database placement (S3-sync to worker-local EBS)
 
-Databases (~100–500 GB) are synced from S3 to each worker's local EBS at boot
-via the Launch Template `UserData` script. This avoids the complexity and cost
-of EFS/FSx while keeping read performance high. See
+Databases (~65 GiB, ~30k objects) are synced from S3 to each worker's local
+EBS at boot via the Launch Template `UserData` script. This avoids the
+complexity and cost of EFS/FSx while keeping read performance high. See
 [ADR-001](adr-001-db-placement.md) for the full rationale and alternatives
 considered.
 
-Database paths in `conf/aws_batch.config` point to `/mnt/dbs/...` — these
-resolve on each worker after the S3 sync completes.
+The UserData script stops the ECS agent before syncing and starts it
+afterward, so no Batch jobs are scheduled to the worker until all databases
+are present under `/mnt/dbs/`. Database paths in `conf/aws_batch.config`
+point to `/mnt/dbs/...`.
 
 ---
 
@@ -429,6 +431,30 @@ Expected output (names are auto-generated):
     {"Name": "nf-reads-profiler-batch-SpotCo-XXXXXXXXXXXX", "State": "ENABLED", "Status": "VALID"}
 ]
 ```
+
+---
+
+### Fix: HUMAnN "ChocoPhlAn database does not exist" on AWS Batch
+
+**Symptom:** `profile_function` fails immediately (exit 1 within seconds) with:
+```
+CRITICAL ERROR: The directory provided for the ChocoPhlAn database at /mnt/dbs/chocophlan_v4_alpha/ does not exist.
+```
+
+**Cause:** The ECS agent on the ECS-optimized AMI auto-starts on boot and
+registers with Batch before the UserData S3 sync completes. Jobs are scheduled
+to the worker while databases are still transferring. ChocoPhlAn is the largest
+directory (41.7 GiB, 30k files) and finishes last.
+
+**Fix (April 2026):** The UserData script now stops the ECS agent at the top
+(`systemctl stop ecs`) and starts it only after the sync finishes
+(`systemctl start ecs`). Redeploy the stack to pick up the change — see
+"Launch Template UserData" fix above for the deploy + CE re-validate steps.
+
+**Verify:** SSH to a worker during boot and check `/var/log/nf-userdata.log`.
+The sync should complete and ECS should start *after* the "user data done"
+message. Or check that `ls /mnt/dbs/chocophlan_v4_alpha/` has ~30k files
+before any jobs run.
 
 ---
 

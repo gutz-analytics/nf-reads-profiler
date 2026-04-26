@@ -418,6 +418,11 @@ Resources:
               set -x
               echo "=== nf-reads-profiler user data starting at $(date) ==="
 
+              # The ECS agent auto-starts on the ECS-optimized AMI and registers
+              # with Batch immediately. Stop it so no jobs are scheduled before
+              # the DB sync completes (~65 GiB / 30k objects).
+              systemctl stop ecs
+
               ARCH=$(uname -m)
               if [ "$ARCH" = "aarch64" ]; then
                 URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
@@ -438,8 +443,8 @@ Resources:
               /opt/conda-aws/bin/aws s3 sync s3://${DbSourceBucket} /mnt/dbs/ \
                   --exclude "referencedata/*" --quiet
 
-              # Restart ECS so the agent sees the populated directory before accepting tasks
-              systemctl restart ecs
+              # Start ECS now that databases are synced to /mnt/dbs
+              systemctl start ecs
 
               echo "=== nf-reads-profiler user data done at $(date) ==="
 
