@@ -43,10 +43,11 @@ source "amazon-ebs" "worker" {
   region        = var.region
   ssh_username  = "ec2-user"
 
-  # 500 GiB snapshot can take 45+ min; default Packer timeout is too short
+  # 500 GiB snapshot routinely takes 60-90+ min on Phase 1 (vJan25) builds.
+  # delay_seconds=30 * max_attempts=240 = 2h wait cap. Default is too short.
   aws_polling {
     delay_seconds = 30
-    max_attempts  = 120
+    max_attempts  = 240
   }
 
   vpc_id    = var.vpc_id
