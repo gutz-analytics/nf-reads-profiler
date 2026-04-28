@@ -66,18 +66,12 @@ which supersedes ADR-001's S3-sync approach.
   Launch template version: v11
 
 ================================================================================
-3. SSM PARAMETER — BLOCKED (head-node IAM)
+3. SSM PARAMETER — RESOLVED (see section 8)
 ================================================================================
 
-  The head-node-role does not have ssm:PutParameter permission.
-  /nf-reads-profiler/ami-id is not yet stored in SSM.
-
-  Workaround: the /deploy-stack skill falls back to querying EC2 for the
-  latest self-owned nf-reads-profiler-worker-* AMI. The /preflight skill
-  compares the deployed stack's EcsAmiId against the latest available AMI.
-
-  To fix permanently: add ssm:PutParameter to head-node-role, or run
-  build-ami.sh from a machine with SSM write access.
+  Initially blocked: head-node-role lacked ssm:PutParameter.
+  Resolved in session 4: added scoped inline policy, stored AMI ID in SSM.
+  See section 8 for details.
 
 ================================================================================
 4. CLOUDFORMATION DEPLOY — COMPLETED
@@ -157,7 +151,24 @@ which supersedes ADR-001's S3-sync approach.
   is normal operational risk — production runs use `-resume` to recover.
 
 ================================================================================
-8. OPEN ITEMS
+8. SSM PARAMETER — RESOLVED (2026-04-26, session 4)
+================================================================================
+
+  Fix: added scoped inline policy `ssm-put-nf-reads-profiler` to head-node-role:
+    Action:   ssm:PutParameter
+    Resource: arn:aws:ssm:us-east-2:730883236839:parameter/nf-reads-profiler/*
+
+  Stored: /nf-reads-profiler/ami-id = ami-0b87926a60df7043e (Version 1)
+
+  Round-trip verified: put + get both succeed from this host.
+
+  All consumers wired up:
+    - build-ami.sh writes to SSM after building
+    - /deploy-stack reads from SSM (primary) with EC2 fallback
+    - /preflight compares deployed stack vs latest self-owned AMI (EC2 query)
+
+================================================================================
+9. OPEN ITEMS
 ================================================================================
 
   - [done] AMI built: ami-0b87926a60df7043e (Packer, arm64, 500 GiB)
@@ -171,6 +182,5 @@ which supersedes ADR-001's S3-sync approach.
   - [done] /deploy-stack skill updated with AMI lookup
   - [done] /preflight skill updated with AMI version check
   - [done] Smoke test: custom AMI works (databases present, fast boot)
-  - [blocked] Store AMI ID in SSM — head-node lacks ssm:PutParameter
+  - [done] Store AMI ID in SSM — added ssm:PutParameter to head-node-role
   - [ ] Full end-to-end smoke test pass (re-run; spot termination was bad luck)
-  - [ ] Commit all changes on I14-custom-ami-worker branch

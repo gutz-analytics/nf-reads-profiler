@@ -613,12 +613,47 @@ aws cloudformation describe-stacks \
 | `batch-failed-jobs` | ≥ 5 failures in 5 min | Systemic error (bad image, IAM, etc.) |
 | `batch-high-pending` | ≥ 50 pending for 15 min | Spot + on-demand capacity exhausted |
 
+Both alarms publish to the SNS topic `nf-reads-profiler-alerts`. Verify the
+email subscription is `Confirmed` before relying on alarms:
+
+```bash
+aws sns list-subscriptions-by-topic \
+  --region us-east-2 \
+  --topic-arn arn:aws:sns:us-east-2:730883236839:nf-reads-profiler-alerts
+```
+
+A `SubscriptionArn` of `pending confirmation` means the recipient still needs
+to click the AWS confirmation link in their inbox — until then no alarm
+emails will be delivered.
+
 Spot interruptions are not automatically retried (`maxRetries=0` in `aws_batch.config`); use `-resume` to rerun failed samples.
 
 ### Live job logs
 
+Job stdout/stderr lands in CloudWatch log group **`/aws/batch/job`** (the
+Batch default), not the `/aws/batch/nf-reads-profiler` group the stack
+provisions. The stack-provisioned group exists but is empty because the
+Nextflow-submitted job definitions don't override `logConfiguration`.
+
+Stream names follow `nf-<image-tag>/default/<job-id>`, e.g.
+`nf-barbarahelena-humann-4-0-3/default/20050178771c43229872feed13f00c8d`.
+
 ```bash
-aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
+# Tail every running job in real time
+aws logs tail /aws/batch/job --follow --region us-east-2
+
+# Tail a specific image (e.g. HUMAnN jobs only)
+aws logs tail /aws/batch/job --follow --region us-east-2 \
+  --log-stream-name-prefix nf-barbarahelena-humann-
+
+# Fetch logs for a specific job ID
+JOB_ID=<paste-job-id>
+LOG_STREAM=$(aws batch describe-jobs --region us-east-2 --jobs "$JOB_ID" \
+  --query 'jobs[0].container.logStreamName' --output text)
+aws logs get-log-events --region us-east-2 \
+  --log-group-name /aws/batch/job \
+  --log-stream-name "$LOG_STREAM" \
+  --query 'events[].message' --output text
 ```
 
 ### AWS Batch console
@@ -642,7 +677,8 @@ aws logs tail /aws/batch/nf-reads-profiler --follow --region us-east-2
 **Typical run — 100 samples (MetaPhlAn + HUMAnN):**
 - Spot EC2: ~$35–100
 - S3: ~$5–20/month total
-- Recommended budget threshold: **$500/month** to catch runaway jobs
+- Recommended budget threshold: **$200/month** during pilot/debugging
+  (template default; bump to $500 once production runs are routine)
 
 ---
 
