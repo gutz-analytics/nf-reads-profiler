@@ -59,7 +59,7 @@ Parameters:
 
   MonthlyBudgetThreshold:
     Type: Number
-    Default: 500
+    Default: 200
     Description: Monthly AWS spend alert threshold in USD (alerts fire at 80% actual and 100% forecasted)
 
   BudgetAlertEmail:
@@ -431,6 +431,14 @@ Resources:
             else
               echo "OK: all databases and awscli present"
               cat /mnt/dbs/.ami-build-timestamp 2>/dev/null || true
+
+              # Phase 1 (issue I20): pre-warm MetaPhlAn vJan25 page cache.
+              # Sequential read of the 34 GB index (~5 min on gp3 baseline)
+              # avoids the ~30+ min cold-fault stall on the first profile_taxa
+              # task. vOct22 not warmed in Phase 1; that's deferred.
+              echo "=== Pre-warming MetaPhlAn vJan25 page cache ==="
+              time cat /mnt/dbs/metaphlan_databases/vJan25/*.bt2l > /dev/null 2>&1 || true
+              echo "OK: vJan25 page cache warmed"
             fi
 
             echo "=== nf-reads-profiler worker boot done at $(date) ==="
