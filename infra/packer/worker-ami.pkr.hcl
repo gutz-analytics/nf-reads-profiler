@@ -111,11 +111,33 @@ build {
     ]
   }
 
+  # Phase 1 (issue I21): fetch vJan25 from official biobakery source and
+  # prepare it (decompress .bz2, build joined fasta, bowtie2-build the
+  # index). Without this, every profile_taxa task spends ~12 min doing
+  # this on first run and may time out the 1h Batch attempt limit.
+  #
+  # vOct22 is intentionally NOT touched — it stays as the S3-synced .bz2
+  # form for HUMAnN's internal MetaPhlAn pre-screen. Phase 2 will extend
+  # this pattern to vOct22.
+  provisioner "shell" {
+    inline = [
+      "echo '=== Phase 1: fetching vJan25 from official biobakery source ==='",
+      "sudo systemctl start docker || true",
+      "sudo docker pull colinbrislawn/metaphlan:4.2.4",
+      "sudo rm -rf /mnt/dbs/metaphlan_databases/vJan25",
+      "sudo mkdir -p /mnt/dbs/metaphlan_databases/vJan25",
+      "sudo docker run --rm -v /mnt/dbs:/mnt/dbs colinbrislawn/metaphlan:4.2.4 metaphlan --install --index mpa_vJan25_CHOCOPhlAnSGB_202503 --bowtie2db /mnt/dbs/metaphlan_databases/vJan25/",
+      "echo '=== vJan25 prep complete ==='",
+      "ls -lh /mnt/dbs/metaphlan_databases/vJan25/ | head",
+    ]
+  }
+
   # Validate databases and awscli
   provisioner "shell" {
     inline = [
       "echo '=== Validating pre-baked content ==='",
       "for d in chocophlan_v4_alpha full_mapping_v4_alpha metaphlan_databases uniref90_annotated_v4_alpha_ec_filtered; do count=$(find /mnt/dbs/$d -type f | wc -l); echo \"$d: $count files\"; if [ \"$count\" -eq 0 ]; then echo \"FATAL: $d has no files\" >&2; exit 1; fi; done",
+      "vJan25_bt2l=$(find /mnt/dbs/metaphlan_databases/vJan25 -name '*.bt2l' | wc -l); echo \"metaphlan/vJan25 .bt2l files: $vJan25_bt2l\"; if [ \"$vJan25_bt2l\" -lt 4 ]; then echo \"FATAL: metaphlan/vJan25 missing .bt2l index files (need >=4)\" >&2; exit 1; fi",
       "/opt/conda-aws/bin/aws --version",
       "echo '=== Validation passed ==='",
     ]
