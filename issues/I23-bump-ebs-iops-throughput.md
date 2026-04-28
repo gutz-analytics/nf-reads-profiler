@@ -1,10 +1,32 @@
-# I23 — Bump EBS gp3 IOPS / throughput on spot workers
+# I23 — Bump EBS gp3 IOPS / throughput for post-init disk performance
 
 ## Status
 
-Proposed — 2026-04-28. Promoted from a footnote in I20 to its own
-issue. Defer until I16 baseline numbers tell us whether throughput
-or random-IOPS is the actual bottleneck.
+Proposed — 2026-04-28. Originally promoted from a footnote in I20.
+Rescoped on the same day after we discovered (issue I24) that
+first-boot disk slowness is dominated by snapshot lazy-load, not gp3
+settings. **gp3 IOPS/throughput tuning only matters after the volume
+is fully initialized** — which on a fresh-from-AMI worker means
+"after the lazy-load is past." See I24 for the cold-boot fix.
+
+Defer until I16 baseline numbers (or post-FSR measurements) tell us
+whether random-IOPS or sequential throughput is the actual bottleneck
+during steady-state workloads.
+
+## Scope (what I23 covers, what it does NOT)
+
+| Phase of disk activity | Bottleneck | Solved by |
+|---|---|---|
+| Boot, fresh from AMI snapshot | Snapshot lazy-load (S3-backed) | **I24 — Fast Snapshot Restore** |
+| `cat *.bt2l > /dev/null` warmup on a freshly-booted worker | Snapshot lazy-load (mostly), NOT gp3 throughput | I24 |
+| `cat *.bt2l > /dev/null` warmup on a worker whose volume is already initialized | gp3 sequential throughput | this issue (option A) |
+| `bowtie2-align-l` random-mmap on a hot index | warm-cache (RAM) — no disk IO | n/a |
+| `bowtie2-align-l` random-mmap on a cold index post-init | gp3 IOPS | this issue (option B) |
+| HUMAnN ChocoPhlAn random-mmap on cold per-clade pangenomes | gp3 IOPS | this issue (option B) |
+
+I23 is for the **post-init** rows. If you haven't enabled FSR, every
+fresh worker spends its first 30-90 min in lazy-load territory and
+gp3 settings do nothing for that phase.
 
 ## Background
 
@@ -17,22 +39,15 @@ Spot workers boot from a custom AMI with all reference DBs baked into
 | IOPS | 3000 | $0.005/provisioned-IOPS-month above 3000 |
 | Throughput | 125 MB/s | $0.04/MB/s-month above 125 |
 
-I20 measurements show the disk profile that matters at task time:
-
-- **Sequential pre-warm** (`cat *.bt2l > /dev/null` in UserData): bound
-  by **throughput**. 125 MB/s = ~5 min for a 34 GB index.
-- **mmap random-access** (bowtie2 cold-fault when warmup is skipped or
-  the index is bigger than free RAM): bound by **IOPS**. 3000 IOPS
-  ≈ 12 MB/s effective — 30+ min stall on first task per worker.
-
-## Two distinct interventions
+## Two distinct interventions (both post-init only)
 
 ### A. Bump throughput from 125 → 250 MB/s (or 500 MB/s)
 
-Speeds up the UserData warmup. With 250 MB/s the 34 GB vJan25 cat
-takes ~2:15 instead of ~4:30. With 500 MB/s, ~1:10.
+Once a volume is initialized (or FSR has pre-warmed it), sequential
+reads run at the gp3 throughput cap. With 250 MB/s the 34 GB vJan25
+cat takes ~2:15 instead of ~4:30; with 500 MB/s, ~1:10.
 
-| Setting | $/month per volume (above default) | Warmup time, 34 GB |
+| Setting | $/month per volume (above default) | Sequential read of 34 GB (post-init) |
 |---|---|---|
 | 125 MB/s (default) | $0 | ~4:30 |
 | 250 MB/s | $5 | ~2:15 |
@@ -41,21 +56,26 @@ takes ~2:15 instead of ~4:30. With 500 MB/s, ~1:10.
 EBS billing is by-the-hour on the volume's lifetime. A worker that
 exists for 1 hour pays roughly $0.007-$0.021 extra at 250-500 MB/s.
 
-Win: shaves ~3 min off every worker's first-job-acceptance time. At I10
-scale (lots of worker churn), this compounds; for max005 it's
-negligible.
+Win: shaves ~3 min off the post-init warmup. **Only realised if
+combined with I24 (FSR) or after the volume has been touched once
+end-to-end.** Without FSR, the warmup is bottlenecked upstream and
+this knob is moot.
 
 ### B. Bump IOPS from 3000 → 12000
 
-Speeds up cold-fault mmap when something has NOT been pre-warmed. With
-the Phase 1 design (vJan25 pre-warmed in UserData), bowtie2 hits warm
-cache so this is mostly insurance.
+Speeds up cold-fault mmap on indexes that haven't been pre-warmed —
+HUMAnN's per-clade ChocoPhlAn pangenome loads, for example, where
+which clade is needed isn't known until MetaPhlAn detects species and
+the random-IOPS pattern is unavoidable.
 
-But Phase 1 deliberately leaves vOct22 unwarmed. HUMAnN's internal
-MetaPhlAn pre-screen will pay the cold-fault stall on first
-profile_function task per worker — currently ~30 min. Bumping IOPS to
-12000 gives roughly 4× improvement → ~7-8 min on the cold path, which
-might be cheaper than adding the vOct22 warmup.
+This is a **post-init** problem (block has been touched once, but
+isn't in page cache). Bumping IOPS to 12000 gives ~4× improvement on
+that cold-cache mmap pattern — ~7-8 min instead of ~30 min for the
+chocophlan working set.
+
+If we're already running with vOct22 pre-warmed (Phase 2 of I20)
+and chocophlan-per-clade is still the dominant cold-IO pattern,
+this is the remaining lever.
 
 | Setting | $/month per volume (above default) |
 |---|---|
@@ -107,7 +127,12 @@ Decide based on I16 / I10 trace:
 
 ## Related
 
-- I20 — pre-warm MetaPhlAn cache (alternative to IOPS bump for vOct22)
+- **I24 — Fast Snapshot Restore — addresses the cold-boot lazy-load
+  problem this issue used to conflate with gp3 settings. Land I24
+  first; this issue then becomes useful for post-init tuning.**
+- I20 — pre-warm MetaPhlAn cache (alternative to IOPS bump for vOct22).
+  I20's warmup math also assumed gp3 throughput; see I24 for the
+  actual first-boot bottleneck.
 - I21 — bake MetaPhlAn DB prep (alternative to runtime DB prep)
 - I22 — per-process AMIs / multi-queue (orthogonal; if AMIs are smaller,
   the throughput bump matters less because the warmup completes

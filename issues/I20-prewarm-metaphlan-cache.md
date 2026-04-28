@@ -31,6 +31,22 @@ mmap random access is IOPS-bound (≈ 12 MB/s effective). For a 20 GB
 random-access pattern interleaved with alignment work, this is **roughly
 30 minutes of stall on the first profile_function task per worker**.
 
+## ⚠️ Important caveat — sequential pre-warm is bottlenecked by snapshot lazy-load
+
+The "sequential pre-warm" math below (~125 MB/s, ~5 min for 34 GB)
+**assumes the EBS volume has already been initialized**. On a freshly-
+booted worker, the volume is lazy-loading from the AMI's snapshot:
+first-touch reads pull blocks from S3 at ~6-50 MB/s regardless of gp3
+throughput settings. Observed live during the 2026-04-28 Phase 1
+deploy: vJan25 warmup ran at ~6 MB/s — projected ~95 min for 34 GB.
+
+The pre-warm is still useful (it puts the cost in the boot phase
+instead of during a job, and amortizes over many tasks per worker),
+but the wall-clock numbers in the table below apply only **once
+lazy-load is past**, OR with **EBS Fast Snapshot Restore** enabled
+(see I24). Without FSR, expect 30-90 min of UserData warmup time on
+a fresh worker, not 3-5 min.
+
 ## Evidence (from live run on PID 5262, 2026-04-28)
 
 - bowtie2 spent ~33 minutes in state `D` (uninterruptible disk wait)
@@ -270,8 +286,14 @@ split is worth the refactor cost.
 - I14 — custom AMI (the DBs being baked is what makes this even possible)
 - I18 — FASTERQ_DUMP threading (different bottleneck, different stage)
 - I19 (if opened) — spot reclamation + retries (orthogonal)
-- I21 (if opened) — split MetaPhlAn into its own Nextflow process —
-  multiplies the value of I20
+- I21 — bake MetaPhlAn DB prep into the AMI (Phase 1 partner)
+- I22 — per-process AMIs / multi-queue (smaller AMIs would reduce the
+  lazy-load surface that the warmup pays through)
+- I23 — gp3 IOPS/throughput (applies after init; doesn't accelerate
+  the warmup itself)
+- **I24 — Fast Snapshot Restore — without this, the warmup time is
+  dominated by snapshot lazy-load, not gp3 throughput. The numbers in
+  this issue's tables apply only post-init or with FSR enabled.**
 
 ## Anti-recommendation: do NOT pre-warm all of /mnt/dbs/
 
