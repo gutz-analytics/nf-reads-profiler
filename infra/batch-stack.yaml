@@ -619,25 +619,30 @@ Resources:
         - !Ref AlarmTopic
     DependsOn: SpotQueue
 
-  # Fires when many jobs are stuck pending — indicates spot capacity shortage
-  # causing the fallback on-demand CE to also be exhausted or maxvCPU-limited.
-  PendingJobsAlarm:
+  # Fires when many jobs are stuck RUNNABLE — indicates spot capacity is
+  # exhausted AND the on-demand fallback CE is also full or hitting the
+  # MaxvCPUsOnDemand cap. Operator action: raise MaxvCPUsOnDemand or
+  # check spot interruption rate. Tracks the RunnableJobCount gauge
+  # emitted by BatchQueueDepthFunction (issue I17).
+  RunnableJobsAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub "${ProjectTag}-batch-high-pending"
-      AlarmDescription: "50+ jobs pending on spot-queue for 15+ minutes. Spot capacity may be exhausted and on-demand vCPU limit reached. Consider raising MaxvCPUsOnDemand."
+      AlarmName: !Sub "${ProjectTag}-batch-high-runnable"
+      AlarmDescription: "10+ jobs stuck RUNNABLE on spot-queue for 15+ minutes. Spot capacity exhausted and on-demand vCPU limit reached. Consider raising MaxvCPUsOnDemand."
       Namespace: AWS/Batch
-      MetricName: PendingJobCount
+      MetricName: RunnableJobCount
       Dimensions:
         - Name: JobQueue
           Value: !GetAtt SpotQueue.JobQueueArn
       Statistic: Maximum
       Period: 300
       EvaluationPeriods: 3
-      Threshold: 50
+      Threshold: 10
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
       AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
         - !Ref AlarmTopic
     DependsOn: SpotQueue
 
@@ -693,12 +698,12 @@ Resources:
 
           cw = boto3.client('cloudwatch')
 
+          # Event-driven counters: emit value=1 per state-transition. Sum
+          # aggregation gives a "throughput in window" metric. Only kept
+          # for terminal states; queue-depth gauges (RUNNABLE, RUNNING,
+          # etc.) are emitted by the scheduled BatchQueueDepthFunction
+          # below as actual depths via list-jobs. See issue I17.
           METRIC_MAP = {
-              'SUBMITTED': 'SubmittedJobCount',
-              'PENDING':   'PendingJobCount',
-              'RUNNABLE':  'RunnableJobCount',
-              'STARTING':  'StartingJobCount',
-              'RUNNING':   'RunningJobCount',
               'SUCCEEDED': 'SucceededJobCount',
               'FAILED':    'FailedJobCount',
           }
@@ -749,6 +754,129 @@ Resources:
       SourceArn: !GetAtt BatchJobStateRule.Arn
 
 # ---------------------------------------------------------------------------
+# Batch Queue Depth — scheduled poll → CloudWatch (issue I17)
+# Replaces the broken event-driven RunnableJobCount with an actual depth
+# gauge polled every 60s via list-jobs. The previous design emitted
+# value=1 per state-change event, which gave the alarm at most "1" to
+# look at; with this Lambda the alarm sees real queue depth.
+# ---------------------------------------------------------------------------
+
+  BatchQueueDepthLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectTag}-batch-queue-depth-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: PollAndPublish
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: batch:ListJobs
+                Resource: '*'
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: AWS/Batch
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  BatchQueueDepthFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectTag}-batch-queue-depth"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt BatchQueueDepthLambdaRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          QUEUE_NAME: !Ref SpotQueue
+          QUEUE_ARN:  !GetAtt SpotQueue.JobQueueArn
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+
+          batch = boto3.client('batch')
+          cw    = boto3.client('cloudwatch')
+
+          QUEUE_NAME = os.environ['QUEUE_NAME']
+          QUEUE_ARN  = os.environ['QUEUE_ARN']
+
+          # Live queue-depth gauges. Emitted as actual counts (not value=1)
+          # so Maximum/Average aggregation gives the real backlog.
+          STATUSES = {
+              'SUBMITTED': 'SubmittedJobCount',
+              'PENDING':   'PendingJobCount',
+              'RUNNABLE':  'RunnableJobCount',
+              'STARTING':  'StartingJobCount',
+              'RUNNING':   'RunningJobCount',
+          }
+
+          def count_jobs(status):
+              count, token = 0, None
+              while True:
+                  kwargs = {'jobQueue': QUEUE_NAME, 'jobStatus': status, 'maxResults': 100}
+                  if token:
+                      kwargs['nextToken'] = token
+                  resp = batch.list_jobs(**kwargs)
+                  count += len(resp['jobSummaryList'])
+                  token = resp.get('nextToken')
+                  if not token:
+                      break
+              return count
+
+          def handler(event, context):
+              metric_data = [
+                  {
+                      'MetricName': metric,
+                      'Dimensions': [{'Name': 'JobQueue', 'Value': QUEUE_ARN}],
+                      'Value': count_jobs(status),
+                      'Unit': 'Count',
+                  }
+                  for status, metric in STATUSES.items()
+              ]
+              cw.put_metric_data(Namespace='AWS/Batch', MetricData=metric_data)
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  BatchQueueDepthScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectTag}-batch-queue-depth-schedule"
+      Description: "Poll Batch queue depth every 60s and publish to CloudWatch."
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Id: BatchQueueDepthLambda
+          Arn: !GetAtt BatchQueueDepthFunction.Arn
+
+  BatchQueueDepthLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt BatchQueueDepthFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BatchQueueDepthScheduleRule.Arn
+
+# ---------------------------------------------------------------------------
 # CloudWatch Dashboard
 # ---------------------------------------------------------------------------
 
@@ -785,7 +913,7 @@ Resources:
                 "title": "Active Alarms",
                 "alarms": [
                   "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${ProjectTag}-batch-failed-jobs",
-                  "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${ProjectTag}-batch-high-pending"
+                  "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${ProjectTag}-batch-high-runnable"
                 ]
               }
             },
@@ -808,7 +936,7 @@ Resources:
         }
     DependsOn:
       - FailedJobsAlarm
-      - PendingJobsAlarm
+      - RunnableJobsAlarm
 
 # ---------------------------------------------------------------------------
 # AWS Budget
