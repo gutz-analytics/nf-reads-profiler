@@ -50,8 +50,8 @@ process FASTERQ_DUMP {
         --mem ${task.memory.toGiga()}G \\
         $sra_file
 
-    # Compress all fastq files
-    pigz -p $task.cpus *.fastq
+    # Compress all fastq files. No -p; use all open cpu cores!
+    pigz *.fastq
 
     # Create directory for processed files
     mkdir -p processed
