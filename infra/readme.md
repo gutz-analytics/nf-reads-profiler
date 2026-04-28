@@ -103,14 +103,17 @@ Databases (~65 GiB) live on each worker's local 500 GiB gp3 EBS volume at
 `/mnt/dbs/`. This keeps read performance high for random-seek tools (Bowtie2,
 DIAMOND). Database paths in `conf/aws_batch.config` point to `/mnt/dbs/...`.
 
-**Current state (S3 sync at boot):** The Launch Template UserData syncs
-databases from S3 at boot. This takes 20+ minutes for 30k objects and is being
-replaced. See [ADR-001](adr-001-db-placement.md) (now superseded).
+**Custom AMI with pre-baked databases.** Workers boot from a custom
+Packer-built AMI with `/mnt/dbs/` already populated and Miniconda/awscli
+already installed — no S3 sync happens at boot, ECS registers in
+seconds. The AMI is rebuilt with `infra/packer/build-ami.sh`, which
+publishes the new AMI ID to SSM `/nf-reads-profiler/ami-id`. The Batch
+stack reads that SSM parameter at deploy time. See
+`issues/I14-custom-ami-worker.md` for the original migration and
+`infra/playbook-ami-v2-rebuild.md` for the current rebuild flow.
 
-**Planned: Custom AMI with pre-baked databases.** Databases and Miniconda/awscli
-will be baked into a custom AMI built with Packer, eliminating the boot-time
-sync entirely. Workers will register with ECS in seconds. See
-`issues/I14-custom-ami-worker.md` for the full plan.
+The earlier S3-sync-at-boot model (~20 min boot delay for 30k objects)
+is documented in [ADR-001](adr-001-db-placement.md), now superseded.
 
 ---
 
@@ -230,7 +233,7 @@ Nextflow copies them into `workDir` automatically.
 
 ---
 
-# Part 2: Confirming Setup Before a Run
+# Part 3: Confirming Setup Before a Run
 
 Run these checks on the runner VM before submitting a pipeline job.
 
@@ -256,9 +259,12 @@ aws batch describe-compute-environments \
 ```bash
 aws s3 ls s3://gutz-nf-reads-profilers-workdir/ --region us-east-2 | head
 aws s3 ls s3://gutz-nf-reads-profilers-runs/samplesheets/ --region us-east-2
-# Also verify the DB source bucket (DbSourceBucket param) is reachable
-aws s3 ls s3://cjb-gutz-s3-demo/ --region us-east-2 | head
 ```
+
+The DB source bucket (`cjb-gutz-s3-demo`) is no longer touched at
+worker runtime — it's only used by Packer at AMI bake time. Verifying
+it from the head node here would just check the head node's IAM, not
+the worker's. Skip.
 
 ### 4. Check IAM runner policy is attached
 
@@ -311,17 +317,17 @@ Key flags:
 ### Database paths
 
 `nextflow.config` defaults point to local paths (`/home/ubuntu/disk_dbs/...`).
-The `aws` profile overrides these to `/mnt/dbs/...` in `conf/aws_batch.config`
-— databases are synced from S3 to worker-local storage at boot (see
-[ADR-001](adr-001-db-placement.md)).
+The `aws` profile overrides these to `/mnt/dbs/...` in `conf/aws_batch.config`.
+Workers boot with `/mnt/dbs/` already populated by the custom AMI — no
+runtime S3 sync. See "Database placement" above.
 
 ---
 
-# Part 3: Troubleshooting
+# Part 4: Troubleshooting
 
 ## Compute Environments Show as INVALID
 
-**Symptom:** Pre-run check (Part 2, step 2) returns `"Status": "INVALID"`.
+**Symptom:** Pre-run check (Part 3, step 2) returns `"Status": "INVALID"`.
 
 **Diagnose:** Get the status reason:
 
@@ -380,20 +386,47 @@ Expected output (names are auto-generated):
 CRITICAL ERROR: The directory provided for the ChocoPhlAn database at /mnt/dbs/chocophlan_v4_alpha/ does not exist.
 ```
 
-**Cause:** The ECS agent on the ECS-optimized AMI auto-starts on boot and
-registers with Batch before the UserData S3 sync completes. Jobs are scheduled
-to the worker while databases are still transferring. ChocoPhlAn is the largest
-directory (41.7 GiB, 30k files) and finishes last.
+**Cause:** the worker booted from an AMI that doesn't have the
+ChocoPhlAn DB baked in — almost always because the launch template is
+still pointing at the wrong AMI ID. Possible reasons:
 
-**Fix (April 2026):** The UserData script now stops the ECS agent at the top
-(`systemctl stop ecs`) and starts it only after the sync finishes
-(`systemctl start ecs`). Redeploy the stack to pick up the change —
-invoke `/deploy-stack` (skill at `.claude/skills/deploy-stack/SKILL.md`).
+1. The Packer build for the custom worker AMI never landed (stock
+   AL2023 ECS AMI has no DBs).
+2. CFN deployed a new AMI to the LT but the compute environment never
+   refreshed (this is the bug `/deploy-stack` works around with
+   `updateToLatestImageVersion: true`).
+3. The SSM parameter `/nf-reads-profiler/ami-id` was overwritten with
+   a stale or wrong AMI ID.
 
-**Verify:** SSH to a worker during boot and check `/var/log/nf-userdata.log`.
-The sync should complete and ECS should start *after* the "user data done"
-message. Or check that `ls /mnt/dbs/chocophlan_v4_alpha/` has ~30k files
-before any jobs run.
+**Diagnose:**
+
+```bash
+# What AMI does the LT think it should use?
+aws ec2 describe-launch-template-versions --region us-east-2 \
+  --launch-template-name nf-reads-profiler-worker --versions '$Latest' \
+  --query 'LaunchTemplateVersions[0].LaunchTemplateData.ImageId' --output text
+
+# What's currently published in SSM?
+aws ssm get-parameter --name /nf-reads-profiler/ami-id \
+  --region us-east-2 --query 'Parameter.Value' --output text
+
+# Inspect a running worker from the head node:
+aws ssm start-session --region us-east-2 --target <instance-id>
+# Then on the worker:
+ls /mnt/dbs/         # should show all 4 DB directories
+cat /mnt/dbs/.ami-build-timestamp
+```
+
+**Historical context:** before the I14 custom-AMI migration, this
+error was caused by an ECS-agent-vs-S3-sync race (the agent registered
+with Batch before the boot-time `aws s3 sync` finished, so jobs landed
+on workers with half-empty `/mnt/dbs/`). With baked DBs the race is
+gone; if you see this error today it's an AMI-mismatch problem, not a
+sync timing problem.
+
+**Fix:** rebuild the AMI with `bash infra/packer/build-ami.sh`, then
+redeploy with `/deploy-stack`. The skill picks up the new AMI from SSM
+and forces both CEs to refresh.
 
 ---
 
@@ -551,7 +584,10 @@ A `SubscriptionArn` of `pending confirmation` means the recipient still needs
 to click the AWS confirmation link in their inbox — until then no alarm
 emails will be delivered.
 
-Spot interruptions are not automatically retried (`maxRetries=0` in `aws_batch.config`); use `-resume` to rerun failed samples.
+Spot interruptions are retried automatically (`process.maxRetries = 5`
+in `conf/aws_batch.config`, with `resourceLimits` capping retries at
+8 vCPU / 64 GB / 6 h). `-resume` is still useful to recover after
+losing the Nextflow runner itself or after the retry budget is exhausted.
 
 ### Live job logs
 
