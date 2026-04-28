@@ -143,49 +143,28 @@ aws ec2 describe-subnets --filters "Name=defaultForAz,Values=true" \
 
 ## Part 2: Deploy the Stack
 
-### 1. Validate the template
+### 1. Validate + deploy (use the `/deploy-stack` skill)
 
-```bash
-# Go to repo root
-cd /home/ubuntu/github/nf-reads-profiler
+The deploy mechanics — validate, deploy, wait for CFN, force compute
+environments to pick up the new launch template — live in the
+project skill at:
 
-aws cloudformation validate-template \
-  --template-body file://./infra/batch-stack.yaml \
-  --region us-east-2
-
-# Look up the current AL2023 ARM64 ECS AMI, save to env var
+```
+.claude/skills/deploy-stack/SKILL.md
 ```
 
-### 2. Deploy
+From a Claude Code session in this repo, invoke:
 
-```bash
-EcsAmiId=$(aws ec2 describe-images --region us-east-2 --owners amazon \
-  --filters "Name=name,Values=al2023-ami-ecs-hvm-*-kernel-*-arm64" \
-            "Name=state,Values=available" \
-  --query 'Images | sort_by(@,&CreationDate) | [-1].ImageId' --output text) \
-&& echo "AMI: $EcsAmiId" \
-&& test -n "$EcsAmiId" \
-&& aws cloudformation deploy \
-  --stack-name nf-reads-profiler-batch \
-  --template-file infra/batch-stack.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region us-east-2 \
-  --parameter-overrides \
-    VpcId=vpc-06ad1e39bb8cd26df \
-    SubnetIds="subnet-09159c654acc505a3,subnet-03afe111356916511,subnet-0d0f1d152c1656677" \
-    WorkDirBucketName=gutz-nf-reads-profilers-workdir \
-    RunsBucketName=gutz-nf-reads-profilers-runs \
-    BudgetAlertEmail=colin@vasogo.com \
-    MonthlyBudgetThreshold=100 \
-    SpotBidPercentage=70 \
-    MaxvCPUsSpot=16 \
-    MaxvCPUsOnDemand=8 \
-    ProjectTag=nf-reads-profiler \
-    EnvironmentTag=development \
-    EcsAmiId="$EcsAmiId" \
-    DbSourceBucket=cjb-gutz-s3-demo \
-  --tags Repo=nf-reads-profiler Environment=development
 ```
+/deploy-stack
+```
+
+The skill looks up the custom worker AMI from SSM
+(`/nf-reads-profiler/ami-id`, populated by `infra/packer/build-ami.sh`),
+validates the template, deploys with the full parameter override block,
+then runs `update-compute-environment` with `updateToLatestImageVersion:
+true` on both CEs — without that step, Batch keeps booting workers from
+the old launch template version even after CFN updates it.
 
 > **`RunsBucketName`** must be globally unique across all AWS accounts.
 > If `gutz-nf-reads-profilers-runs` is taken, choose another name and update
@@ -194,7 +173,7 @@ EcsAmiId=$(aws ec2 describe-images --region us-east-2 --owners amazon \
 > **Subnet note:** Use public subnets (auto-assign public IP) or private subnets
 > with a NAT gateway — Batch instances need outbound internet for DockerHub pulls.
 
-### 3. Get stack outputs
+### 2. Get stack outputs
 
 ```bash
 aws cloudformation describe-stacks \
@@ -209,7 +188,7 @@ Save for the next steps: **From April 21st, 2026**
   - `BatchJobRoleArn`         = arn:aws:iam::730883236839:role/nf-reads-profiler-batch-job-role
 
 
-### 4. Post-Deploy: Attach the `NextflowRunnerPolicyArn` we just recorded
+### 3. Post-Deploy: Attach the `NextflowRunnerPolicyArn` we just recorded
 
 **From April 21st, 2026**
 
@@ -226,7 +205,7 @@ aws iam attach-role-policy \
 
 ```
 
-### 5. Post-Deploy: Add or update the `BatchJobRoleArn` we just recorded
+### 4. Post-Deploy: Add or update the `BatchJobRoleArn` we just recorded
 
 ```bash
 grep "jobRole" conf/aws_batch.config
@@ -363,62 +342,20 @@ ECS bootstrap script with yours. A plain `#!/bin/bash` script fails validation.
 - UserData wrapped in MIME multipart envelope
 - `ServiceRole` removed from both compute environments so they use the Batch service-linked role (`AWSServiceRoleForBatch`) — required to allow future launch template updates via CLI
 
-To redeploy:
+To redeploy: invoke `/deploy-stack` (skill at
+`.claude/skills/deploy-stack/SKILL.md`). The skill validates the
+template, deploys, waits for `stack-update-complete`, then forces both
+compute environments to pick up the new launch template via
+`update-compute-environment` with `updateToLatestImageVersion: true`.
 
-**Step 1 — Update the CloudFormation stack:**
+> **Important:** the older "disable → wait → re-enable" CE-refresh
+> approach (mentioned in earlier docs) is not enough on its own.
+> Batch caches the launch template version on the CE; without an
+> explicit `updateToLatestImageVersion`, workers keep booting from
+> the previous LT version even after the CFN deploy completes. The
+> skill encodes the correct refresh.
 
-```bash
-aws cloudformation deploy \
-  --stack-name nf-reads-profiler-batch \
-  --template-file infra/batch-stack.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region us-east-2 \
-  --parameter-overrides \
-    VpcId=vpc-06ad1e39bb8cd26df \
-    SubnetIds="subnet-09159c654acc505a3,subnet-03afe111356916511,subnet-0d0f1d152c1656677" \
-    WorkDirBucketName=gutz-nf-reads-profilers-workdir \
-    RunsBucketName=gutz-nf-reads-profilers-runs \
-    BudgetAlertEmail=colin@vasogo.com \
-    MonthlyBudgetThreshold=100 \
-    SpotBidPercentage=70 \
-    MaxvCPUsSpot=16 \
-    MaxvCPUsOnDemand=8 \
-    ProjectTag=nf-reads-profiler \
-    EnvironmentTag=development \
-    DbSourceBucket=cjb-gutz-s3-demo
-```
-
-**Step 2 — Wait for the stack update to complete:**
-
-```bash
-aws cloudformation wait stack-update-complete \
-  --stack-name nf-reads-profiler-batch \
-  --region us-east-2
-```
-
-**Step 3 — Force compute environments to re-validate (disable then re-enable):**
-
-Compute environment names are auto-generated, so look them up from the job queue first:
-
-```bash
-# Look up CE ARNs from the job queue
-CE_SPOT=$(aws batch describe-job-queues --job-queues spot-queue --region us-east-2 \
-  --query "jobQueues[0].computeEnvironmentOrder[0].computeEnvironment" --output text)
-CE_ONDEMAND=$(aws batch describe-job-queues --job-queues spot-queue --region us-east-2 \
-  --query "jobQueues[0].computeEnvironmentOrder[1].computeEnvironment" --output text)
-
-aws batch update-compute-environment --compute-environment $CE_SPOT --state DISABLED --region us-east-2
-aws batch update-compute-environment --compute-environment $CE_ONDEMAND --state DISABLED --region us-east-2
-```
-
-Wait ~30 seconds, then re-enable:
-
-```bash
-aws batch update-compute-environment --compute-environment $CE_SPOT --state ENABLED --region us-east-2
-aws batch update-compute-environment --compute-environment $CE_ONDEMAND --state ENABLED --region us-east-2
-```
-
-**Step 4 — Confirm both environments are VALID:**
+After the skill finishes, confirm both environments are VALID:
 
 ```bash
 aws batch describe-compute-environments \
@@ -450,8 +387,8 @@ directory (41.7 GiB, 30k files) and finishes last.
 
 **Fix (April 2026):** The UserData script now stops the ECS agent at the top
 (`systemctl stop ecs`) and starts it only after the sync finishes
-(`systemctl start ecs`). Redeploy the stack to pick up the change — see
-"Launch Template UserData" fix above for the deploy + CE re-validate steps.
+(`systemctl start ecs`). Redeploy the stack to pick up the change —
+invoke `/deploy-stack` (skill at `.claude/skills/deploy-stack/SKILL.md`).
 
 **Verify:** SSH to a worker during boot and check `/var/log/nf-userdata.log`.
 The sync should complete and ECS should start *after* the "user data done"
@@ -528,29 +465,11 @@ aws cloudformation wait stack-delete-complete \
   --region us-east-2
 ```
 
-**Step 3 — Redeploy:**
-
-```bash
-aws cloudformation deploy \
-  --stack-name nf-reads-profiler-batch \
-  --template-file infra/batch-stack.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region us-east-2 \
-  --parameter-overrides \
-    VpcId=vpc-06ad1e39bb8cd26df \
-    SubnetIds="subnet-09159c654acc505a3,subnet-03afe111356916511,subnet-0d0f1d152c1656677" \
-    WorkDirBucketName=gutz-nf-reads-profilers-workdir \
-    RunsBucketName=gutz-nf-reads-profilers-runs \
-    BudgetAlertEmail=colin@vasogo.com \
-    MonthlyBudgetThreshold=100 \
-    SpotBidPercentage=70 \
-    MaxvCPUsSpot=16 \
-    MaxvCPUsOnDemand=8 \
-    ProjectTag=nf-reads-profiler \
-    EnvironmentTag=development \
-    DbSourceBucket=cjb-gutz-s3-demo \
-  --tags Repo=nf-reads-profiler Environment=development
-```
+**Step 3 — Redeploy:** invoke `/deploy-stack` (skill at
+`.claude/skills/deploy-stack/SKILL.md`). With the phantom Batch resources
+gone from CFN's view, the redeploy creates fresh CEs and a fresh LT;
+the workdir bucket is adopted intact thanks to CFN's idempotent
+`CreateBucket`.
 
 **Step 4 — Re-attach the runner policy:**
 
