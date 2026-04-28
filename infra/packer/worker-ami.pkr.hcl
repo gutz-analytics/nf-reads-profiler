@@ -126,7 +126,7 @@ build {
       "sudo docker pull colinbrislawn/metaphlan:4.2.4",
       "sudo rm -rf /mnt/dbs/metaphlan_databases/vJan25",
       "sudo mkdir -p /mnt/dbs/metaphlan_databases/vJan25",
-      "sudo docker run --rm -v /mnt/dbs:/mnt/dbs colinbrislawn/metaphlan:4.2.4 metaphlan --install --index mpa_vJan25_CHOCOPhlAnSGB_202503 --bowtie2db /mnt/dbs/metaphlan_databases/vJan25/",
+      "sudo docker run --rm -v /mnt/dbs:/mnt/dbs colinbrislawn/metaphlan:4.2.4 metaphlan --install --index mpa_vJan25_CHOCOPhlAnSGB_202503 --db_dir /mnt/dbs/metaphlan_databases/vJan25/",
       "echo '=== vJan25 prep complete ==='",
       "ls -lh /mnt/dbs/metaphlan_databases/vJan25/ | head",
     ]
