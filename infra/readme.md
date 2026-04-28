@@ -611,7 +611,13 @@ aws cloudformation describe-stacks \
 | Alarm | Condition | Meaning |
 |---|---|---|
 | `batch-failed-jobs` | ≥ 5 failures in 5 min | Systemic error (bad image, IAM, etc.) |
-| `batch-high-pending` | ≥ 50 pending for 15 min | Spot + on-demand capacity exhausted |
+| `batch-high-runnable` | ≥ 10 RUNNABLE for 15 min | Spot + on-demand capacity exhausted |
+
+`batch-high-runnable` tracks the `RunnableJobCount` gauge emitted every 60s
+by the `nf-reads-profiler-batch-queue-depth` Lambda (a list-jobs poll). The
+old `batch-high-pending` alarm tracked `PendingJobCount` from the event-driven
+Lambda, which never fired because Nextflow-submitted jobs never enter
+`PENDING` state. See issue I17 for the rewrite.
 
 Both alarms publish to the SNS topic `nf-reads-profiler-alerts`. Verify the
 email subscription is `Confirmed` before relying on alarms:
