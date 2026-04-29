@@ -1,0 +1,315 @@
+================================================================================
+Session: AMI v2 Phase 1 — bake + warm vJan25 for profile_taxa — 2026-04-28
+Branch: I14-custom-ami-worker
+================================================================================
+
+## Session goal
+
+Land Phase 1 of the AMI v2 rebuild: validate the
+"download from biobakery + UserData page-cache warmup" pattern on the
+single MetaPhlAn DB used by profile_taxa (vJan25). Once proven, Phase 2
+extends the same pattern to vOct22 / profile_function.
+
+Diagnosed during the prior I16 max005 resume run:
+
+  - profile_taxa (SRR36835853) hit the 1h Batch attempt timeout.
+  - ~12 min of that hour were burned by MetaPhlAn 4.2.4 doing on-the-fly
+    DB prep (decompress .bz2, build joined fasta, bowtie2-build).
+  - Live measurements on PID 5262 showed ~33 min in state D
+    (uninterruptible disk wait) doing cold-cache mmap of vOct22 from
+    EBS at ~5.6 MB/s — IOPS-throttled at the gp3 baseline.
+
+Two issues filed:
+  - I20 — pre-warm MetaPhlAn page cache in worker UserData
+  - I21 — bake MetaPhlAn DB prep into the Packer AMI from biobakery
+
+================================================================================
+1. PLAYBOOK + ISSUE NARROWING
+================================================================================
+
+Playbook (infra/playbook-ami-v2-rebuild.md) and issues I20/I21 narrowed
+to **Phase 1 = profile_taxa / vJan25 only**. Phase 2 deferred (vOct22
+/ profile_function — same mechanism, separate validation).
+
+Phase 1 keeps the existing S3 sync intact (vOct22 still served from
+cjb-gutz-s3-demo as today). The new Packer step replaces only the
+vJan25 directory contents with the prepared form fetched directly
+from biobakery via `metaphlan --install`.
+
+Decision: source vJan25 from the official biobakery distribution rather
+than copying through cjb-gutz-s3-demo. Two upsides:
+  - Removes ~54 GB of redundant data from our bucket (when Phase 2
+    also moves vOct22 to biobakery).
+  - Canonical version pinning — biobakery's distribution for a given
+    index name is immutable.
+
+================================================================================
+2. CONFIG CHANGES — COMMITTED
+================================================================================
+
+Commit ecc3836: "Add Phase 1 AMI v2 rebuild: bake + warm vJan25 for profile_taxa"
+
+  conf/aws_batch.config:
+    - process.maxRetries = 5 (was 0). Covers spot reclamation, OOM, timeout.
+      With resourceLimits in place, retries can't blow past 8 vCPU / 64 GB / 6h.
+    - withName: profile_taxa { time = '3h'; memory = '60 GB'; cpus = 4 }
+      (the 1h default was too tight while DB prep ate ~12 min on first run).
+    - Inline-documented executor.queueSize, submitRateLimit, maxErrorRetry.
+
+  infra/packer/worker-ami.pkr.hcl:
+    - New provisioner: docker pull colinbrislawn/metaphlan:4.2.4, then
+      `metaphlan --install --index mpa_vJan25_CHOCOPhlAnSGB_202503
+       --db_dir /mnt/dbs/metaphlan_databases/vJan25/`.
+    - Validation block now asserts >=4 .bt2l files in vJan25/.
+
+  infra/batch-stack.yaml:
+    - UserData warmup: `time cat /mnt/dbs/metaphlan_databases/vJan25/*.bt2l > /dev/null`.
+      Sequential read of the 34 GB index (~5 min on gp3 baseline) avoids
+      the ~30+ min cold-fault stall on the first profile_taxa task.
+    - MonthlyBudgetThreshold default 500 -> 200 (prior parked change).
+
+  New docs:
+    - infra/playbook-ami-v2-rebuild.md (combined I20+I21 runbook, Phase 1)
+    - issues/I20-prewarm-metaphlan-cache.md
+    - issues/I21-bake-metaphlan-db-prep.md
+
+================================================================================
+3. AMI BUILD #1 — FAILED AFTER 11:34 (FLAG TYPO)
+================================================================================
+
+Pre-flight clean: queue empty, no orphan screen sessions, prior AMI
+(ami-0b87926a60df7043e) still in SSM as rollback target.
+
+Build log: logs/ami-build-20260428-154810.log
+Packer instance: i-002d4823d1b1a5b5f (terminated by Packer cleanup).
+
+Failure point: `metaphlan --install` invocation rejected one of the
+flags from the original biobakery forum example:
+
+    metaphlan: error: unrecognized arguments: --bowtie2db
+
+MetaPhlAn 4.2.4's flag is `--db_dir`, not `--bowtie2db` (the forum post
+referenced was for an older release). Help output from the failed run
+confirmed the 4.2.4 form: `--install --index <name> --db_dir <path>`.
+
+No rollback needed — Packer doesn't update SSM until success, so the
+old AMI ID stayed published.
+
+================================================================================
+4. FLAG FIX — COMMITTED
+================================================================================
+
+Commit 3208ec2: "Fix MetaPhlAn 4.2.4 --install flag: --bowtie2db -> --db_dir"
+
+Single-line change in infra/packer/worker-ami.pkr.hcl. Net delta from
+build #1: `--bowtie2db <path>` becomes `--db_dir <path>`.
+
+================================================================================
+5. AMI BUILD #2 — IN PROGRESS
+================================================================================
+
+Build log: logs/ami-build-20260428-161829.log
+Packer instance: i-0d559b92c1fa2626f (launched 16:18 UTC).
+
+Milestones observed in real time:
+  16:18  Packer instance launched
+  16:21  Miniconda + awscli installed
+  ~16:25 S3 sync of /mnt/dbs/ complete (vOct22 .bt2l files visible in log)
+  16:29  Phase 1 provisioner started — docker pull colinbrislawn/metaphlan:4.2.4
+  16:29:32  metaphlan --install passed flag check (no "unrecognized arguments")
+  16:29:33  Downloading mpa_vJan25_CHOCOPhlAnSGB_202503_bt2.tar (33433.5645 MB)
+            from http://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/
+
+The flag-fix worked — `metaphlan --install` ran clean and is now pulling
+the 33 GB pre-built index tar from biobakery's CDN. Expected total build
+duration: ~30-40 min wallclock (S3 sync ~5 min + biobakery download
++ untar ~10-15 min + Packer-side AMI snapshot ~10-15 min).
+
+================================================================================
+6. AMI BUILD #2 — COMPLETED, WITH PACKER WAIT-TIMEOUT EDGE CASE
+================================================================================
+
+Build log: logs/ami-build-20260428-161829.log
+Packer instance: i-0d559b92c1fa2626f (terminated by Packer cleanup).
+
+Build content milestones, all clean:
+  16:18  Packer instance launched
+  16:29  metaphlan --install begins
+  17:12  Decompressing .bz2 fastas
+  17:22  Joining FASTAs
+  17:23  Removing intermediates; "Download complete"
+  17:23  Validation block: 6 .bt2l files in vJan25/ (>= 4 required)
+  17:23  Packer "Stopping the source instance"
+  17:24  AMI ami-0b82e0161299a01ea created (state pending)
+
+But: Packer's aws_polling.max_attempts=120 (60 min wait cap) was too
+tight for the 500 GB snapshot. Packer's wait-for-ready expired before
+the snapshot reached 'available', so packer build exited non-zero
+even though the AMI was real. build-ami.sh has `set -euo pipefail`,
+so the SSM put-parameter step never ran.
+
+Two follow-up commits pre-empted this for next time:
+  - 4ccfeca "Make Packer build resilient to slow AMI snapshots"
+    - worker-ami.pkr.hcl: max_attempts 120 -> 240 (2 h cap)
+    - build-ami.sh: drop `set -e`, fall back to EC2 describe-images
+      query if packer-manifest.json missing, then `aws ec2 wait
+      image-available` before publishing to SSM.
+  - c8752b9 "Update operational docs: SNS, log group, SSM resolution"
+
+Manual recovery for THIS build: polled until AMI flipped to
+'available' (~17:55 UTC, snapshot was at 71% when checked, finished
+~01:08 UTC the next day after we'd done other work). Published
+manually:
+  aws ssm put-parameter --name /nf-reads-profiler/ami-id \
+    --type String --value ami-0b82e0161299a01ea \
+    --overwrite --region us-east-2
+
+================================================================================
+7. STACK DEPLOY (1st pass) — FOREGROUND-WARMUP TRAP
+================================================================================
+
+Used /deploy-stack skill against the same parameter block as the
+2026-04-26 deploy. Stack went UPDATE_COMPLETE; CEs forced to refresh
+via update-compute-environment with updateToLatestImageVersion=true;
+both spot + on-demand back to ENABLED + VALID.
+
+Resumed I16 max005 under screen `nf` with project name
+max005-20260427-203146. Cached upstream stages (AWS_DOWNLOAD,
+get_software_versions) hit; FASTERQ_DUMP queued 5 jobs RUNNABLE.
+
+Then: nothing. For ~50 minutes, two workers (i-031fa1854fa999308 +
+i-0edf0c9ddd29ccdbd) were "running" in EC2 but ECS never registered
+them. Couldn't SSM in (TargetNotConnected), implying SSM agent
+hadn't started. Both workers were eventually spot-reclaimed before
+finishing whatever they were doing.
+
+Replacement worker i-08970c1fc7dda1793 launched 00:19 UTC the next
+day, same problem: 50+ min in, ECS still didn't see it. Console
+output via aws ec2 get-console-output cracked the case:
+
+  [   76]  cloud-init: + cat /mnt/dbs/metaphlan_databases/vJan25/*.bt2l
+  ... no further output until 3670 sec later ...
+  [ 3670]  systemd-shutdown[1]: Powering off.
+
+The UserData warmup was running in the FOREGROUND. cloud-init
+blocked behind the cat for the full lazy-load window. SSM agent
+and ECS agent both depend on cloud-init completion before
+registering, so the worker accepted no jobs. Spot reclamation
+killed it after ~61 min — before the warmup even finished — and
+Batch spawned a replacement that hit the same wall. Endless cycle.
+
+================================================================================
+8. SNAPSHOT LAZY-LOAD DISCOVERY — REVISED I20 + I23, NEW I24
+================================================================================
+
+Live observation during the stuck UserData: cat read rate was
+~6 MB/s (7 GB loaded after ~20 min). At that rate the 34 GB index
+takes ~95 min to fully read.
+
+This is far below the 125 MB/s gp3 baseline that I20 originally
+predicted. Investigation: this is **EBS snapshot lazy-load**, not
+gp3 throughput. Two distinct layers were conflated:
+
+  - gp3 user throughput: 125 MB/s baseline, configurable up to
+    1000 MB/s. Applies to the steady-state volume AFTER init.
+  - Snapshot lazy-load: separate upstream throttle. First-touch
+    reads pull blocks from S3 to EBS at ~6-50 MB/s regardless
+    of gp3 settings. Lasts until every block has been read once.
+
+Bumping gp3 throughput/IOPS does nothing for first-boot warmup.
+The original I23 plan (250 / 500 MB/s throughput, ~$5-15/month)
+was based on a layer that doesn't apply to fresh workers.
+
+The custom AMI from I14 didn't eliminate the slow-first-read
+problem; it relocated it from `aws s3 sync` (visible) to snapshot
+lazy-load (invisible). Total cost-per-fresh-worker is similar.
+
+Three artifacts (commit 883ef8f):
+
+  - I24 (new) — Enable EBS Fast Snapshot Restore on the worker
+    AMI snapshot. Pre-replicates per-AZ; volumes restored from a
+    FSR-enabled snapshot serve full gp3 throughput from boot.
+    Cost ~$0.75/AZ/hr × 3 AZ = $2.25/hr while enabled.
+    Comparable to a network-FS subscription but pay-as-you-go;
+    enable just before a big run, disable after.
+
+  - I20 (revised) — caveat at top: warmup math (5 min for 34 GB)
+    assumes post-init or FSR; on fresh workers expect 30-90 min
+    UserData blocking. Pre-warm is still useful (puts the cost
+    in boot phase, amortizes over many tasks per worker), but
+    only delivers when paired with I24 OR worker reuse.
+
+  - I23 (revised) — rescoped to post-init only. New table at top
+    mapping each disk-activity phase to its actual bottleneck.
+
+================================================================================
+9. WARMUP-BACKGROUNDING FIX — UNBLOCKED THE RUN
+================================================================================
+
+Root-cause fix (commit 56a0c98): wrap the cat in nohup ... & in
+batch-stack.yaml UserData so cloud-init returns immediately. ECS
+agent then registers within ~1 min and accepts jobs while the
+warmup hydrates the volume in the background. Output of the
+warmup (with `time`) appended to /var/log/nf-userdata.log so we
+can still measure how long the lazy-load actually takes.
+
+Before:
+  [   76]  cloud-init: + cat /mnt/dbs/.../vJan25/*.bt2l
+  [ 3670]  systemd-shutdown: Powering off  (cloud-init never
+                                            finished; SSM never
+                                            registered)
+
+After (commit 56a0c98 + redeploy):
+  [   76]  cloud-init: + nohup bash -c 'time cat ...'
+  [   76]  cloud-init: + echo 'worker boot done'
+  [   76]  Cloud-init finished. Up 76.12 seconds
+  [   82]  Amazon SSM Agent v3.3.4108 is running
+  [  158]  ECS container instance ACTIVE (Tasks=4)
+
+Worker i-0c55871f5b0313baa (m8g.2xlarge, launched 16:27:41 UTC):
+  16:29:06  cloud-init exit
+  16:30:19  ECS registered
+  16:31     4 of 5 FASTERQ_DUMP jobs RUNNING
+
+Total worker-boot-to-first-job ~3 min, vs >18 hours of cyclical
+spot reclamation before. Run is unblocked.
+
+================================================================================
+10. ALSO COMMITTED THIS SESSION
+================================================================================
+
+  - df926e5  Drop pigz -p flag in FASTERQ_DUMP so it autoscales
+             to host vCPUs (issue I18).
+  - 4456acd  Fix high-pending alarm: switch to scheduled
+             RUNNABLE-depth Lambda (issue I17). Lambda
+             nf-reads-profiler-batch-queue-depth runs every 60s
+             and emits actual queue depths via list-jobs;
+             event-driven Lambda METRIC_MAP trimmed to terminal
+             states; PendingJobsAlarm replaced with
+             RunnableJobsAlarm (threshold 10).
+  - d1abd36  Add I22 (multi-queue per-stage AMIs) + I23 (EBS
+             IOPS/throughput); both deferred until I16 baseline.
+  - 8647c03  Replace inline deploy steps in infra/readme.md with
+             /deploy-stack skill references.
+  - 974615f  Drop stale pre-custom-AMI sections from
+             infra/readme.md (S3-sync narrative, ChocoPhlAn
+             race-condition fix, DbSourceBucket runtime check,
+             outdated maxRetries=0 note, duplicate Part 2).
+  - .claude/settings.json: 19 read-only AWS commands allowlisted
+             via /fewer-permission-prompts.
+
+================================================================================
+11. STILL TBD (waiting on this run's results)
+================================================================================
+
+  - [ ] profile_taxa first-task wallclock on AMI v2 (target
+        ~5-10 min vs ~50 min before).
+  - [ ] profile_function first-task wallclock — informs whether
+        Phase 2 (vOct22 bake + warmup) is worth doing.
+  - [ ] Verify queue-depth Lambda is emitting RunnableJobCount
+        every 60s (CloudWatch metrics console).
+  - [ ] FASTERQ_DUMP per-task wallclock (informs I18 A/B).
+  - [ ] Whether process.maxRetries=5 actually caught a spot
+        reclamation (already proven indirectly by the cycle of
+        lost workers, but a clean retry signal in the trace
+        would confirm).
