@@ -1,0 +1,150 @@
+================================================================================
+Session: Spot-reclaim postmortem + FSR prep — 2026-04-29
+Branch: I14-custom-ami-worker
+================================================================================
+
+## Session goal
+
+Diagnose why the 2026-04-29 max005 run aborted on a single spot reclaim
+despite process.maxRetries=5, fix it, and prepare the FSR (Fast Snapshot
+Restore) tooling so tomorrow's run can boot workers at full gp3
+throughput instead of paying the snapshot lazy-load tax discovered in
+the 2026-04-28 session.
+
+================================================================================
+1. STARTING STATE (carried over from 2026-04-28 session)
+================================================================================
+
+  - AMI v2 deployed: ami-0b82e0161299a01ea (snap-0e20eed57c3a5b848)
+    in launch template lt-0d9193dd0f66d68ee v14.
+  - vJan25 page-cache warmup baked into UserData, but documented as
+    bottlenecked by snapshot lazy-load (~6 MB/s, projected 95 min for
+    34 GB) without FSR. See I24.
+  - max005 run kicked off ~17:something UTC on 2026-04-29.
+  - Stack healthy: spot CE 16 vCPU + on-demand CE 8 vCPU, both VALID.
+
+================================================================================
+2. RUN ABORTED 2026-04-29 18:32 UTC
+================================================================================
+
+batch-doctor + log-reader agents pinned the cause to .nextflow.log:
+
+  18:32:11.064  task monitor failed to read exit code from S3 workdir
+  18:32:11.325  TaskHandler[id: 28; name: profile_taxa (SRR36835882);
+                exit: -; error: Host EC2 (instance i-0661383eb3f9f1878)
+                terminated.; workDir: s3://.../5c/c6f84ee3...]
+  18:32:11.420  ERROR: Error executing process > 'profile_taxa (SRR36835882)'
+  18:32:11.435  Session aborted -- Cause: Process failed
+  18:32:11.453  Killing running tasks (5)
+  18:32:13.310  Execution complete -- Goodbye
+
+Final stats:
+  WorkflowStats[succeededCount=19; failedCount=1; ...;
+                retriesCount=0; abortedCount=5; ...]
+
+retriesCount=0 means Nextflow's process.maxRetries path never fired.
+
+================================================================================
+3. ROOT CAUSE: maxRetries doesn't catch "Host EC2 terminated"
+================================================================================
+
+conf/aws_batch.config has process.maxRetries = 5 with no errorStrategy
+override. That covers non-zero exits, OOM, timeouts — but Batch surfaces
+spot reclaim as "Host EC2 terminated" with no exit code, and Nextflow
+treats that as a fatal ProcessFailedException. Goes straight to
+Session aborted, never increments task.attempt.
+
+Two layers handle this case:
+
+  a) aws.batch.maxSpotAttempts — Batch transparently re-queues the job
+     before the failure surfaces to Nextflow.
+  b) Per-process errorStrategy = { task.attempt <= N ? 'retry' : 'terminate' }
+     — routes host-terminated through the retry counter.
+
+Neither was set. Fix chosen: option (a), one-line global config.
+
+================================================================================
+4. FILED I19 + PATCHED CONFIG
+================================================================================
+
+  - issues/I19-spot-reclaim-retry.md  (new)
+      Diagnosis, two-layer fix model, acceptance criteria.
+
+  - conf/aws_batch.config  (patched)
+      Added `maxSpotAttempts = 5` inside aws.batch { ... } block,
+      with a 2-line comment pointing to I19.
+
+Picked up automatically on next pipeline invocation; no infra deploy
+needed.
+
+================================================================================
+5. FSR TOOLING — TWO NEW SCRIPTS
+================================================================================
+
+I24 (Fast Snapshot Restore) draft listed enable-fsr.sh + disable-fsr.sh
+as files-to-create. User got billing approval today. Wrote both.
+
+  - infra/packer/enable-fsr.sh
+      Resolves AMI from SSM /nf-reads-profiler/ami-id → root snapshot.
+      Prints billing notice ($2.25/hr for 3 AZs, 1 hr minimum per AZ).
+      ABORTS unless FSR_CONFIRM=yes set.
+      Calls enable-fast-snapshot-restores for all 3 AZs at once.
+      Polls every 30s until all reach 'enabled' (timeout default 60 min).
+      Idempotent: AlreadyEnabled errors treated as success.
+
+  - infra/packer/disable-fsr.sh
+      Kill-switch: enumerates EVERY FSR pair in region (not just current
+      AMI's snapshot) so a stale rolled-over AMI's snapshot can't quietly
+      keep billing. No confirmation prompt — disabling is always safe.
+      Verifies post-disable that no pairs remain billing.
+
+Both pass `bash -n`, mode 755.
+
+================================================================================
+6. IAM PERMISSION VERIFICATION
+================================================================================
+
+Caller: arn:aws:sts::730883236839:assumed-role/head-node-role/i-0c85d6ecbdb08bac8
+
+Required → Result:
+  ec2:DescribeFastSnapshotRestores  → live read OK (returned empty)
+  ssm:GetParameter                  → live read OK (ami-0b82e0161299a01ea)
+  ec2:DescribeImages                → live read OK (snap-0e20eed57c3a5b848)
+  ec2:EnableFastSnapshotRestores    → IAM simulator: allowed
+  ec2:DisableFastSnapshotRestores   → IAM simulator: allowed
+
+Granted via AmazonEC2FullAccess + AmazonSSMReadOnlyAccess already
+attached to head-node-role. No IAM changes needed.
+
+Current FSR state in us-east-2: empty (no enabled pairs). Clean start.
+
+================================================================================
+7. PLAN FOR TOMORROW (2026-04-30)
+================================================================================
+
+  1. Commit today's changes (I19 + config patch + scripts + this log).
+  2. FSR_CONFIRM=yes infra/packer/enable-fsr.sh   (~20 min wait)
+  3. nextflow run main.nf -profile aws --input <samplesheet> \
+        --project <name> -resume
+       (-resume picks up today's 19 succeeded tasks; only the 5
+        aborted siblings + remaining work re-runs)
+  4. After run completes: infra/packer/disable-fsr.sh
+  5. Verify with describe-fast-snapshot-restores that nothing remains.
+
+Two improvements vs today's run:
+  - maxSpotAttempts=5: a single reclaim won't kill the pipeline.
+  - FSR enabled: warmup runs at gp3-baseline ~125 MB/s instead of
+    snapshot-lazy-load ~6 MB/s. vJan25 warmup target <5 min vs ~95 min.
+
+================================================================================
+8. STILL TBD
+================================================================================
+
+  - [ ] FSR cost on a real run (24-hour worst case ~$54).
+  - [ ] vJan25 warmup wallclock with FSR on (target <5 min).
+  - [ ] profile_taxa first-task wallclock with warm cache + FSR.
+  - [ ] Confirm maxSpotAttempts=5 actually caught a reclaim
+        (retriesCount > 0 in WorkflowStats).
+  - [ ] Carry-over from 2026-04-28 session: profile_function first-task
+        wallclock, FASTERQ_DUMP per-task time, queue-depth Lambda
+        emission verification.
