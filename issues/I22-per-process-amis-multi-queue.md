@@ -133,6 +133,11 @@ simplicity.
 - I21 — bake MetaPhlAn DB prep (per-AMI bake becomes natural)
 - I23 — bump EBS IOPS / throughput (orthogonal: applies whether single
   or split AMIs)
+- **I25 — instance-type benchmark.** Tight dependency: I22's per-stage
+  instance-type assignments should be driven by I25's measurements,
+  not guesses. In particular, the question "does FASTERQ_DUMP benefit
+  from G4 single-thread perf, or is G3/G2 fine?" is answered by I25
+  and shapes how this issue's queues are configured.
 
 ## Out of scope
 
