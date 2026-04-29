@@ -433,12 +433,17 @@ Resources:
               cat /mnt/dbs/.ami-build-timestamp 2>/dev/null || true
 
               # Phase 1 (issue I20): pre-warm MetaPhlAn vJan25 page cache.
-              # Sequential read of the 34 GB index (~5 min on gp3 baseline)
-              # avoids the ~30+ min cold-fault stall on the first profile_taxa
-              # task. vOct22 not warmed in Phase 1; that's deferred.
-              echo "=== Pre-warming MetaPhlAn vJan25 page cache ==="
-              time cat /mnt/dbs/metaphlan_databases/vJan25/*.bt2l > /dev/null 2>&1 || true
-              echo "OK: vJan25 page cache warmed"
+              # Run in the BACKGROUND so cloud-init returns immediately and
+              # the ECS agent can register with Batch. Without `&`, the cat
+              # blocks UserData for the duration of the snapshot lazy-load
+              # (~95 min observed at 6 MB/s without FSR, see issue I24),
+              # and the worker accepts no jobs the entire time. With `&`,
+              # ingest jobs (FASTERQ_DUMP, etc.) start immediately; only
+              # profile_taxa pays any remaining unwarmed cost on first task.
+              echo "=== Starting MetaPhlAn vJan25 page-cache warmup (background) ==="
+              nohup bash -c 'time cat /mnt/dbs/metaphlan_databases/vJan25/*.bt2l > /dev/null 2>&1' \
+                >> /var/log/nf-userdata.log 2>&1 &
+              echo "Warmup PID: $!"
             fi
 
             echo "=== nf-reads-profiler worker boot done at $(date) ==="
