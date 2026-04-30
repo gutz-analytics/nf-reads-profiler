@@ -15,12 +15,13 @@ spot rate worth it?**
 
 Generations in scope (ARM-only project — Graviton family only):
 
-| Gen | Family example | Core | In CE today? |
+| Gen | Family examples | Core | In CE today? |
 |---|---|---|---|
-| G2 | r6g | Neoverse-N1 | yes |
-| G3 | r7g | Neoverse-V1 | yes |
-| G4 | r8g | Neoverse-V2 | yes |
+| G4 | r8g, m8g, c8g | Neoverse-V2 | yes |
 | G5 | m9g | Neoverse-V3 (latest) | **no — not yet evaluated**; see Phase 2 |
+
+G2 (r6g/Neoverse-N1) and G3 (r7g/Neoverse-V1) removed from CE 2026-04-30 —
+too slow per task to justify inclusion.
 
 The pipeline has several stages that are wholly or partially single-
 threaded, where Amdahl's law caps any benefit from more vCPUs:
@@ -42,32 +43,29 @@ This issue exists to *measure* that delta rather than guess.
 
 ## Problem
 
-The compute environment (`SpotComputeEnvironment`) accepts a list of
-allowed instance types (Graviton G2/G3/G4 — `r6g`, `r7g`, `r8g`) and
-lets Batch pick whichever is cheapest spot. We've never measured
-whether the price difference is justified: is r7g spot actually
-cheaper *per task completed* than r8g, or is r8g's faster per-core
-performance enough to offset its higher hourly rate?
+The compute environment (`SpotComputeEnvironment`) now runs G4-only
+(`r8g`, `m8g`, `c8g` — Neoverse-V2). G2/G3 removed 2026-04-30. The
+open question shifts to *within* G4: which family (r8g vs m8g vs c8g)
+wins per task for each stage, and whether G5 (`m9g`) is worth adding.
 
 There's also no measurement of:
 
 - **Per-stage fit**: profile_taxa is bowtie2-bound (memory-bandwidth
   + L2/L3 cache size matter); FASTERQ_DUMP is I/O-bound (NVMe + EBS
   throughput); profile_function is ChocoPhlAn-mmap (RAM size matters).
-  The optimal generation could differ by stage.
-- **Spot reclaim rate by generation**: G3 (r7g) and G4 (r8g) have
-  different spot capacity pools, possibly different interruption rates.
+  The optimal family could differ by stage.
+- **Spot reclaim rate by family**: r8g, m8g, c8g draw from different
+  pools, possibly different interruption rates.
 
-Without data, we either (a) accept whatever Batch's "cheapest spot"
-heuristic picks — which optimizes for $/hr not $/task — or (b) constrain
-the CE to one type and lose the diversification benefit.
+Without data, Batch's "cheapest spot" heuristic optimizes for $/hr
+not $/task — exactly where per-family measurement matters.
 
 ## Why this is worth tracking now
 
 The post-FSR runs (starting 2026-04-29) have a clean baseline: workers
 boot fast, page cache warmup is reproducible, no S3-sync confound. So
-per-task wallclock differences between r7g and r8g should reflect
-actual CPU/memory differences, not boot-phase noise.
+per-task wallclock differences across G4 families (r8g/m8g/c8g) should
+reflect actual CPU/memory differences, not boot-phase noise.
 
 Today's run alone produced a useful sample (3 workers, 2 generations,
 same workload). Repeated across pilot (I09) and production (I10) runs,
@@ -100,25 +98,23 @@ Write `bin/analyze_run_by_instance_type.py` that:
    ```
    stage              type           N    median_wall  $/task   $/sample
    profile_taxa       r8g.2xlarge    2    1280s        $0.064   $0.064
-   profile_taxa       r7g.2xlarge    1    1410s        $0.058   $0.058
+   profile_taxa       m8g.2xlarge    1    1350s        $0.055   $0.055
    profile_function   r8g.2xlarge    3    7200s        $0.36    $0.36
    ```
 4. Optionally compares against the previous run's table to detect
    spot-price drift.
 
 Acceptance for Phase 1: run the script against today's max005-resume
-and the next pilot (I09) and have a real number for "is r7g cheaper
-*per task* than r8g for profile_taxa, or not?"
+and the next pilot (I09) and have a real number for which G4 family
+(r8g/m8g/c8g) wins per task for profile_taxa.
 
 ### Phase 2 — Act on findings (depends on data)
 
 Possible CE config changes (only if data justifies):
 
-- Drop older generations (r7g/r6g) if a newer one is consistently
-  cheaper-per-task (modern generations often have better $/perf
-  despite higher $/hr).
-- Drop a newer generation if older spot is meaningfully cheaper *and*
-  reclaim rate on the older one isn't materially worse.
+- Narrow G4 to best-performing family per stage (r8g for HUMAnN,
+  c8g for CPU-bound MetaPhlAn, m8g as general fallback) if data shows
+  clear winners — otherwise keep all three for pool diversity.
 - Add r8g.4xlarge (or m9g.4xlarge once available) to the CE if
   I20-style memory-packing (2-4 tasks per worker) would amortize the
   extra cost.
@@ -146,8 +142,8 @@ Possible CE config changes (only if data justifies):
 - [ ] Phase 1 script runs against an existing trace.txt and produces
       a stage × instance-type cost table.
 - [ ] Documented finding (in this issue or `infra/readme.md`) of the
-      form: "for `profile_taxa`, the cheapest-per-task generation is
-      `<r8g|r7g|r6g>`, with per-task cost figures and rationale."
+      form: "for `profile_taxa`, the cheapest-per-task G4 family is
+      `<r8g|m8g|c8g>`, with per-task cost figures and rationale."
 - [ ] Same finding for `profile_function` and `FASTERQ_DUMP`.
 - [ ] At least 2 runs of data per instance-type per stage before any
       CE config change.

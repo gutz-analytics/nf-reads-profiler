@@ -2,9 +2,17 @@
 
 ## Status
 
-Proposed — 2026-04-28. Discovered during I16 max005 resume run while
-investigating bowtie2 single-threaded behavior. Measurements during the
-live run made the diagnosis unambiguous.
+**Open — implementation exists but is broken.** 2026-04-30.
+
+The vJan25 prewarm `cat` command is already in the stack's UserData
+(`batch-stack.yaml`), but it runs as `nohup ... &` (background). This
+means UserData finishes immediately and the ECS agent starts accepting
+jobs before the prewarm completes. I16 data (2026-04-30) confirms the
+race is real and consequential — see measurements below.
+
+**The fix is one line**: remove `nohup ... &` so the prewarm blocks
+before the ECS agent starts. This is the highest-confidence low-effort
+change available for reducing `profile_taxa` wallclock variance.
 
 **Phase 1 scope (current):** pre-warm the **vJan25** index only — the
 DB used by `profile_taxa`. This is the first DB being moved into the
@@ -128,6 +136,74 @@ cold-fault penalty, and pre-warming it (~3 min sequential) eliminates
 that. Chocophlan is out of scope for I20; revisit if measurement shows
 its per-clade fault-in is itself a significant cold-cache cost.
 
+## New data — I16 max005 run 2026-04-30 (project `max005-20260430-160716`)
+
+This run is the first clean dataset with FSR enabled (I24) and the background
+prewarm already in UserData. It directly measures the prewarm race condition.
+
+### profile_taxa trace results (from `20260430_162154_trace.txt`)
+
+| Sample | Reads | realtime | %cpu | peak_rss | Cache state |
+|---|---|---|---|---|---|
+| SRR36835853 | 8,458,427 | 10m 59s | 616% | 35.4 GB | warm |
+| SRR36835882 | 8,532,961 | 9m 27s | 511% | 35.4 GB | warm |
+| SRR36835076 | 8,959,121 | 9m 54s | 570% | 35.4 GB | warm |
+| SRR36835310 | 11,291,070 | 12m 21s | 488% | 35.4 GB | warm |
+| SRR36835334 | 11,193,897 | **59m 24s** | **102%** | 35.4 GB | **cold** |
+
+### What the data shows
+
+**%cpu is the cold-cache fingerprint.** Warm-cache tasks ran bowtie2 at
+488–616% CPU (multi-threaded alignment). SRR36835334 ran at 102% —
+essentially single-threaded — because bowtie2 was stalled in
+uninterruptible disk wait (page-faulting the vJan25 index from EBS)
+rather than doing alignment work. 5.5× wallclock difference between
+warm and cold tasks on the same instance type and similar read counts.
+
+### The race condition confirmed
+
+Workers booted ~16:49–16:54 UTC. profile_taxa jobs submitted ~16:52–16:53
+UTC — **2–3 minutes after boot**. The background prewarm (`cat` of 34 GB
+at FSR-enabled gp3 speeds) needs ~5 min at 125 MB/s. Jobs arrived before
+it could finish. Four workers happened to win the race (jobs submitted
+slightly after their prewarm completed or were on workers that booted
+earlier); SRR36835334's worker lost.
+
+### Baseline now established (I20 acceptance criterion 1 met)
+
+- Cold-cache `profile_taxa` realtime: **~59 min** at **102% CPU**
+- Warm-cache `profile_taxa` realtime: **9–12 min** at **488–616% CPU**
+- Gap to close: **~47 min per affected task** (first task on a cold worker)
+- At I10 scale (16k samples, assume 1 cold worker per 4 tasks): thousands
+  of worker-hours recoverable
+
+### Gap exposed: background prewarm defeats itself
+
+The `nohup ... &` in UserData means:
+1. UserData script exits immediately after launching the prewarm
+2. ECS agent starts and marks the worker as ready
+3. Batch submits the next job — potentially before prewarm finishes
+4. Job pays the full cold-cache penalty anyway
+
+**Fix:** run the prewarm **foreground** in UserData, blocking ECS agent
+start until `cat` completes. Cost: workers become available ~5 min later.
+Benefit: every task on every worker runs on a warm cache, guaranteed.
+
+### profile_function — partial cold-cache signal
+
+| Sample | realtime | %cpu | peak_rss |
+|---|---|---|---|
+| SRR36835076 | 47m 10s | 540% | 20.0 GB |
+| SRR36835310 | 55m 50s | 553% | 19.8 GB |
+| SRR36835334 | 56m 9s | 537% | 21.1 GB |
+| SRR36835853 | 1h 7m 40s | 614% | 19.5 GB |
+| SRR36835882 | **1h 33m 38s** | **344%** | 19.0 GB |
+
+SRR36835882 at 344% (vs 537–614% for others) suggests partial cold cache
+on the HUMAnN vOct22 DB — Phase 2 scope. Not as dramatic as profile_taxa
+(vOct22 is 20 GB vs vJan25's 34 GB, so the penalty is smaller), but
+present and worth fixing once Phase 1 is validated.
+
 ## Approach: pre-warm in worker UserData
 
 Add to the launch-template UserData health-check (currently
@@ -207,15 +283,18 @@ benefits all tasks).
 
 ## Acceptance criteria
 
-- [ ] Baseline measured: time-to-first-MetaPhlAn-result on a fresh
-      worker without pre-warm (use I16 trace data or instrument an
-      explicit timer).
-- [ ] After change: same measurement, expecting ~25-30 min reduction.
+- [x] **Baseline measured** (I16 2026-04-30): cold-cache `profile_taxa`
+      realtime = **59m 24s at 102% CPU**; warm-cache = **9–12 min at
+      488–616% CPU**. Gap = ~47 min per cold first-task.
+- [ ] **Fix deployed**: remove `nohup ... &` from UserData prewarm so
+      it runs foreground and blocks ECS agent start.
+- [ ] **After fix**: `profile_taxa` realtime on first task per worker
+      ≤ 15 min (warm-cache baseline), no 100%-CPU outliers in trace.
 - [ ] No regression on profile_function wallclock for 2nd+ task on
-      the same worker (should be cheaper than baseline because index
-      stays cached anyway after first task).
-- [ ] No regression on worker boot time beyond the expected ~3 min
-      added by sequential read.
+      the same worker (index stays cached after prewarm, so this
+      should be free).
+- [ ] Worker boot-to-ready time increases by ~5 min (foreground prewarm
+      duration at FSR-enabled gp3 speeds) — acceptable tradeoff.
 
 ## Synergy: split MetaPhlAn into its own Nextflow process (would-be I21)
 

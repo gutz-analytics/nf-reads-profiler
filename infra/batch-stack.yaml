@@ -49,12 +49,12 @@ Parameters:
 
   MaxvCPUsSpot:
     Type: Number
-    Default: 16
+    Default: 32
     Description: Maximum vCPUs across all spot instances (controls pipeline parallelism)
 
   MaxvCPUsOnDemand:
     Type: Number
-    Default: 8
+    Default: 0
     Description: Maximum vCPUs for on-demand fallback (cost safety net)
 
   MonthlyBudgetThreshold:
@@ -466,7 +466,7 @@ Resources:
 
   # Primary: spot instances. SPOT_CAPACITY_OPTIMIZED selects the pool with the
   # deepest available capacity, minimizing interruptions for long HUMAnN jobs.
-  # Includes Graviton 2/3/4 to maximize spot pool diversity and availability.
+  # Graviton 4 only — G2/G3 dropped for per-task cost (see I25).
   SpotComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
@@ -489,14 +489,7 @@ Resources:
           - m8g.4xlarge    # 16 vCPU / 64 GB
           # Graviton 4 (c8g) — compute-optimized for CPU-bound alignment
           - c8g.2xlarge    # 8 vCPU / 16 GB
-          # Graviton 3 — fallback when G4 spot pools are exhausted
-          - r7g.2xlarge    # 8 vCPU / 64 GB
-          - r7g.4xlarge    # 16 vCPU / 128 GB
-          - m7g.2xlarge    # 8 vCPU / 32 GB
-          - c7g.2xlarge    # 8 vCPU / 16 GB
-          # Graviton 2 — older but widely available, lowest spot prices
-          - r6g.2xlarge    # 8 vCPU / 64 GB
-          - m6g.2xlarge    # 8 vCPU / 32 GB
+          - c8g.4xlarge    # 16 vCPU / 32 GB
         LaunchTemplate:
           LaunchTemplateId: !Ref BatchWorkerLaunchTemplate
           Version: $Latest
@@ -528,7 +521,8 @@ Resources:
           - r8g.4xlarge
           - m8g.2xlarge
           - m8g.4xlarge
-          - r7g.2xlarge
+          - c8g.2xlarge
+          - c8g.4xlarge
         LaunchTemplate:
           LaunchTemplateId: !Ref BatchWorkerLaunchTemplate
           Version: $Latest
