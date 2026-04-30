@@ -10,3 +10,7 @@ ramdisk_test/
 results_*
 # Test results, from tests/nextflow.config
 test-out/
+# Local only for now
+logs/
+monkey-hand/
+pull_requests/
