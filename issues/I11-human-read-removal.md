@@ -164,8 +164,16 @@ covers our Graviton workers.
   adding a custom content section.
 - This step adds ~15 min per sample to wall time. At 16K samples with
   MaxvCPUsSpot=16, this is negligible compared to HUMAnN's 4-6h.
-- The human genome DB is small (~16 GB) and will be included in the existing
-  `aws s3 sync` without significant overhead.
+- **hostile index:** `human-t2t-hla` (bowtie2 variant, for paired-end short
+  reads). Download once with:
+  ```sh
+  docker run --rm -v ~/disk_dbs/hostile:/root/.local/share/hostile \
+    colinbrislawn/hostile:2.0.2 hostile index fetch --bowtie2
+  ```
+  Cache lives at `/root/.local/share/hostile` inside the container; mount
+  `~/disk_dbs/hostile` (local) or `/mnt/dbs/hostile` (AWS workers) to that
+  path and pass `--airplane` on all subsequent runs to skip the download check.
+  Index is ~4 GB — add to the existing `aws s3 sync` and AMI bake.
 - **sra-human-scrubber ARM64 path:** `aligns_to` source is in
   `ncbi/ngs-tools` at `tools/tax/src/aligns_to.cpp`. If we want to run
   sra-human-scrubber on Graviton, we could compile it from source in the
