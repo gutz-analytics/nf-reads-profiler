@@ -1,8 +1,9 @@
 # I11: Add human read removal step (host decontamination)
 
 **Priority:** high — affects accuracy of all downstream profiling
-**Size:** medium (new process + new DB parameter + pipeline wiring)
+**Size:** medium (new process + pipeline wiring; no external DB required)
 **Dependencies:** I00 (containerOptions fix); independent of I01-I10
+**Decision:** use `sra-human-scrubber` (NCBI k-mer scrubber) — see tool options below
 
 ---
 
@@ -33,15 +34,24 @@ all downstream processes.
 
 | Tool | Approach | Pros | Cons |
 |------|----------|------|------|
-| **Bowtie2** against CHM13/hg38 | Align reads, keep unmapped | Simple, well-understood, fast | Needs ~16 GB index on disk |
+| **sra-human-scrubber** (NCBI) | k-mer lookup against NCBI human k-mer DB | No genome index needed, NCBI-maintained, purpose-built, fast | ARM64 Docker image needs verification |
+| **Bowtie2** against CHM13/hg38 | Align reads, keep unmapped | Simple, well-understood | Needs ~16 GB index on disk |
 | **KneadData** (wraps Bowtie2 + Trimmomatic) | All-in-one QC + decontam | Common in HUMAnN workflows | Redundant with fastp already running; heavier container |
 | **Minimap2** against CHM13 | Align reads, keep unmapped | Faster than Bowtie2, lower memory | Less standard for short reads |
-| **hostile** | Purpose-built host removal | Fast, minimal config | Newer tool, less community validation |
+| **hostile** | Python wrapper around minimap2; downloads human index on first run | Pure-Python `noarch` + minimap2 has native ARM64 builds → works on Graviton; active development | Newer tool, less community validation; requires index download |
 
-**Recommendation:** Bowtie2 against CHM13v2 (T2T human genome). This is the
-standard approach used by HUMAnN's own documentation and most metagenomics
-pipelines. CHM13 is preferred over hg38 because it has no unplaced contigs
-or ALT loci, giving cleaner alignments.
+**Decision: `sra-human-scrubber`** — NCBI's k-mer-based scrubber
+([`ncbi/sra-human-scrubber`](https://github.com/ncbi/sra-human-scrubber)).
+No large genome index required (k-mer DB is bundled in the container).
+Eliminates the 16 GB DB staging problem and the S3-sync overhead. NCBI
+maintains and validates the human k-mer set. Docker image:
+`docker.io/ncbi/sra-human-scrubber`.
+
+**ARM64 / Graviton blocker:** the core `aligns_to` binary in sra-human-scrubber
+is compiled for x86_64 only. The bioconda package is `noarch` but bundles this
+same x86 binary — the `linux/arm64` Docker image will build successfully but
+fail at runtime on Graviton. Running this step would require a separate x86 CE/queue.
+`hostile` (pure Python + minimap2) is the Graviton-compatible alternative.
 
 ## Implementation sketch
 
@@ -51,46 +61,49 @@ or ALT loci, giving cleaner alignments.
 process remove_human_reads {
   tag "${meta.id}"
   label 'process_medium'
-  container params.docker_container_bowtie2  // or a container that includes bowtie2
+  container params.docker_container_sra_human_scrubber  // custom miniforge3-based image
 
   input:
   tuple val(meta), path(reads)
 
   output:
-  tuple val(meta), path("*_decontam.fq.gz"), emit: reads_decontam
-  tuple val(meta), path("*_human_reads_log.txt"), emit: decontam_log
+  tuple val(meta), path("*_scrubbed*.fastq.gz"), emit: reads_decontam
+  tuple val(meta), path("*_scrub_report.txt"),   emit: decontam_log
 
   script:
   name = task.ext.name ?: "${meta.id}"
-  """
-  bowtie2 -x ${params.human_ref_db} \
-    -1 ${reads[0]} -2 ${reads[1]} \
-    --very-sensitive \
-    --threads ${task.cpus} \
-    --un-conc-gz ${name}_decontam.fq.gz \
-    -S /dev/null \
-    2> ${name}_human_reads_log.txt
-  """
-  // For single-end: use -U and --un-gz instead
+  if (meta.single_end) {
+    """
+    scrub.sh -i ${reads[0]} -o ${name}_scrubbed.fastq.gz \
+      2> ${name}_scrub_report.txt
+    """
+  } else {
+    """
+    scrub.sh -p ${reads[0]} ${reads[1]} \
+      -o ${name}_scrubbed_R1.fastq.gz -O ${name}_scrubbed_R2.fastq.gz \
+      2> ${name}_scrub_report.txt
+    """
+  }
 }
 ```
+
+> **Note:** confirm `scrub.sh` paired-end flags from the container's docs;
+> the exact flag names may differ between releases.
 
 ### New parameters in `nextflow.config`
 
 ```groovy
 params {
     skip_host_removal = false
-    human_ref_db = "/mnt/dbs/human_genome/CHM13v2"  // Bowtie2 index prefix
+    // No human_ref_db needed — k-mer DB is bundled in the container
 }
 ```
 
-### New DB in S3
+### No new DB required
 
-The CHM13v2 Bowtie2 index (~16 GB) needs to be:
-1. Built and uploaded to `s3://cjb-gutz-s3-demo/human_genome/`
-2. Synced to workers via the existing UserData `aws s3 sync` (already
-   included since it syncs everything except `referencedata/*`)
-3. Referenced in `aws_batch.config` as a path parameter override
+Unlike Bowtie2, sra-human-scrubber bundles its k-mer database inside the
+container image. No S3 upload, no launch-template sync change, no
+`/mnt/dbs/` path needed.
 
 ### Wiring in `main.nf`
 
@@ -109,19 +122,19 @@ profile_taxa(decontam_reads)
 
 ## Resource requirements
 
-- **CPU:** 4 (same as other processes)
-- **Memory:** 16–20 GB (Bowtie2 loads index into memory; CHM13 index ~8 GB
-  resident + reads)
-- **Time:** ~10–20 min per sample for paired-end at 32M reads
-- **Disk:** ~16 GB for the Bowtie2 index on `/mnt/dbs/`
+- **CPU:** 4
+- **Memory:** ~4–8 GB (k-mer DB loaded in memory; much lighter than Bowtie2)
+- **Time:** ~5–10 min per sample for paired-end at 32M reads
+- **Disk:** none beyond the container layer
 
 ## Container
 
-Need a Docker image with `bowtie2` and `samtools` that publishes ARM64
-manifests (Graviton workers). Options:
-- `biocontainers/bowtie2` (check ARM64 availability)
-- Build a custom multi-arch image
-- Use an existing pipeline container that includes bowtie2
+Custom multi-arch image built from `docker/sra-human-scrubber/Dockerfile`.
+Uses `condaforge/miniforge3` + `mamba install bioconda::sra-human-scrubber=2.2.1`.
+
+The bioconda package is `noarch` only — no pre-built ARM64 binary exists —
+so we build our own. `miniforge3` supports `linux/arm64` natively, which
+covers our Graviton workers.
 
 ## Files to change
 
@@ -153,3 +166,9 @@ manifests (Graviton workers). Options:
   MaxvCPUsSpot=16, this is negligible compared to HUMAnN's 4-6h.
 - The human genome DB is small (~16 GB) and will be included in the existing
   `aws s3 sync` without significant overhead.
+- **sra-human-scrubber ARM64 path:** `aligns_to` source is in
+  `ncbi/ngs-tools` at `tools/tax/src/aligns_to.cpp`. If we want to run
+  sra-human-scrubber on Graviton, we could compile it from source in the
+  Dockerfile rather than using the pre-built x86 binary. Confirmed via smoke
+  test that the bioconda image fails at runtime on ARM64 with
+  `Exec format error`.
