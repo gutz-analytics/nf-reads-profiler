@@ -23,6 +23,7 @@ cd docker
 # Build and push multi-arch (amd64 + arm64)
 docker buildx build --platform linux/amd64,linux/arm64 -t colinbrislawn/aws-cli-bash:2 --push aws-cli-bash
 docker buildx build --platform linux/amd64,linux/arm64 -t colinbrislawn/sra-tools-bash:3.0.7 --push sra-tools-bash
+docker buildx build --platform linux/amd64,linux/arm64 -t colinbrislawn/sra-human-scrubber:2.2.1 --push sra-human-scrubber
 docker buildx build --platform linux/arm64 -t colinbrislawn/metaphlan:4.2.4 --push metaphlan
 docker buildx build --platform linux/arm64 -t colinbrislawn/medi:0.2.1 --push medi
 ```
