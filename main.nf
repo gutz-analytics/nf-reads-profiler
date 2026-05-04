@@ -66,6 +66,7 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 }
 
 def output_exists(meta) {
+  if (!params.skipCompleted) return false
   def run = meta.run
   def name = meta.id
   def genefamilies_file = file("${params.outdir}/${params.project}/${run}/function/${name}_2_genefamilies.tsv")
@@ -368,10 +369,10 @@ Analysis introspection:
 
   // MultiQC setup
   ch_multiqc_files = channel.empty()
-  ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log.ifEmpty([]))
-  // ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
+  ch_multiqc_files = ch_multiqc_files.mix(clean_reads.out.fastp_log)
+  // ch_multiqc_files = ch_multiqc_files.mix(profile_taxa.out.profile_taxa_log)
   if ( ! params.skipHumann ) {
-    ch_multiqc_files = ch_multiqc_files.concat(profile_function.out.profile_function_log.ifEmpty([]))
+    ch_multiqc_files = ch_multiqc_files.mix(profile_function.out.profile_function_log)
   }
   
 
