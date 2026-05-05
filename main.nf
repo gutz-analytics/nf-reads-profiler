@@ -136,39 +136,60 @@ Analysis introspection:
   if (workflow.containerEngine) {
     summary['Container'] = workflow.container
   }
-  summary['HUMAnN'] = params.docker_container_humann4
-  summary['MetaPhlAn'] = params.docker_container_metaphlan
-  summary['MultiQC'] = params.docker_container_multiqc
-  summary['Hostile'] = params.skipHostile ? 'skipped' : params.docker_container_hostile
 
-  //General
-  summary['Running parameters'] = ""
+  // Containers in pipeline execution order
+  summary['Containers'] = ""
+  summary['fastp'] = params.docker_container_fastp
+  summary['Hostile'] = params.skipHostile ? 'skipped' : params.docker_container_hostile
+  summary['MetaPhlAn'] = params.docker_container_metaphlan
+  summary['HUMAnN'] = params.docker_container_humann4
+  summary['MultiQC'] = params.docker_container_multiqc
+
+  // Run settings
+  summary['Run settings'] = ""
+  summary['Project'] = params.project
   summary['Sample Sheet'] = params.input
+  summary['Output dir'] = params.outdir
   summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
   summary['Merge Reads'] = params.mergeReads
-  summary['nreads cap'] = params.nreads == 0 ? 'unlimited' : params.nreads
+  summary['skipCompleted'] = params.skipCompleted
+
+  // count_reads filter
+  summary['Input filtering'] = ""
   summary['minreads'] = params.minreads
-  summary['skipHumann'] = params.skipHumann
+
+  // HOSTILE — human read removal
+  summary['Hostile parameters'] = ""
   summary['skipHostile'] = params.skipHostile
+  summary['Hostile DB'] = params.skipHostile ? 'skipped' : params.hostile_db
 
-  //BowTie2 databases for metaphlan
+  // fastp — quality trim + subsample
+  summary['fastp parameters'] = ""
+  summary['nreads cap'] = params.nreads == 0 ? 'unlimited' : params.nreads
+
+  // MetaPhlAn — taxonomic profiling
   summary['MetaPhlAn parameters'] = ""
-  summary['MetaPhlAn database'] = params.direct_metaphlan_db
+  summary['MetaPhlAn DB id'] = params.direct_metaphlan_id
+  summary['MetaPhlAn DB path'] = params.direct_metaphlan_db
   summary['Bowtie2 options (direct)'] = params.direct_bt2options
-  summary['Bowtie2 options (humann)'] = params.humann_bt2options
 
-  // ChocoPhlAn and UniRef databases
+  // HUMAnN4 — functional profiling
   summary['HUMAnN parameters'] = ""
+  summary['skipHumann'] = params.skipHumann
+  summary['HUMAnN MetaPhlAn DB id'] = params.humann_metaphlan_id
+  summary['HUMAnN MetaPhlAn DB path'] = params.humann_metaphlan_db
+  summary['Bowtie2 options (humann)'] = params.humann_bt2options
   summary['Chocophlan database'] = params.humann_chocophlan
   summary['Uniref database'] = params.humann_uniref
+  summary['Utility map database'] = params.humann_utilitymap
+  summary['humann_extraparams'] = params.humann_extraparams ?: '(none)'
 
-  //Folders
+  // Folders
   summary['Folders'] = ""
-  summary['Output dir'] = workingpath
+  summary['Project dir'] = workingpath
   summary['Working dir'] = workflow.workDir
-  summary['Output dir'] = params.outdir
   summary['Script dir'] = workflow.projectDir
-  summary['Lunching dir'] = workflow.launchDir
+  summary['Launching dir'] = workflow.launchDir
 
   log.info(summary.collect { k, v -> "${k.padRight(27)}: ${v}" }.join("\n"))
   log.info("")
