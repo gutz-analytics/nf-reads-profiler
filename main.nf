@@ -1,7 +1,7 @@
 #!/usr/bin/env nextflow
 
 include { profile_taxa ; profile_function ; combine_humann_tables ; combine_metaphlan_tables ; combine_humann_taxonomy_tables ; convert_tables_to_biom ; split_stratified_tables ; regroup_genefamilies } from './modules/community_characterisation'
-include { MULTIQC ; get_software_versions ; clean_reads ; count_reads } from './modules/house_keeping'
+include { MULTIQC ; get_software_versions ; clean_reads ; count_reads ; HOSTILE } from './modules/house_keeping'
 include { AWS_DOWNLOAD ; FASTERQ_DUMP } from './modules/data_handling'
 include { MEDI_QUANT } from './subworkflows/quant'
 include { samplesheetToList } from 'plugin/nf-schema'
@@ -139,12 +139,17 @@ Analysis introspection:
   summary['HUMAnN'] = params.docker_container_humann4
   summary['MetaPhlAn'] = params.docker_container_metaphlan
   summary['MultiQC'] = params.docker_container_multiqc
+  summary['Hostile'] = params.skipHostile ? 'skipped' : params.docker_container_hostile
 
   //General
   summary['Running parameters'] = ""
   summary['Sample Sheet'] = params.input
   summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
   summary['Merge Reads'] = params.mergeReads
+  summary['nreads cap'] = params.nreads == 0 ? 'unlimited' : params.nreads
+  summary['minreads'] = params.minreads
+  summary['skipHumann'] = params.skipHumann
+  summary['skipHostile'] = params.skipHostile
 
   //BowTie2 databases for metaphlan
   summary['MetaPhlAn parameters'] = ""
@@ -232,8 +237,14 @@ Analysis introspection:
     log.info("Skipping sample ${meta.id} due to insufficient reads: ${count} < ${params.minreads}")
   }
 
-  // Process passing samples
-  clean_reads(read_check.pass.map { meta, reads, _count -> [meta, reads] })
+  // Hostile runs before fastp so the nreads cap applies to microbial reads only,
+  // not a mix of human + microbial. Paired reads stay paired through this step.
+  if (!params.skipHostile) {
+    HOSTILE(read_check.pass.map { meta, reads, _count -> [meta, reads] })
+    clean_reads(HOSTILE.out.reads_dehosted)
+  } else {
+    clean_reads(read_check.pass.map { meta, reads, _count -> [meta, reads] })
+  }
 
   merged_reads = clean_reads.out.reads_cleaned
 
