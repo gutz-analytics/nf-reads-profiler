@@ -322,6 +322,13 @@ Analysis introspection:
 
     // HUMAnN fully-unaligned reads: already QC'd, ~5–20% of original read count.
     // HUMAnN merges paired reads internally so these are always single-end FASTA.
+    //
+    // groupTuple waits for all samples in a study to finish HUMAnN before emitting,
+    // because it doesn't know the group size upfront. This serialises the HUMAnN →
+    // MEDI handoff per study. In quant.nf, flatMap immediately breaks the group back
+    // into per-sample items so Kraken2 runs in parallel. Net effect: all HUMAnN jobs
+    // in a study must complete before any Kraken2 starts — acceptable for local
+    // testing and small runs; revisit with groupTuple(size:) for large batches.
     profile_function.out.unmapped_reads
       .map { meta, fa -> [meta + [single_end: true], [fa]] }
       .map { meta, reads ->
