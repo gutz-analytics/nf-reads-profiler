@@ -312,6 +312,13 @@ Analysis introspection:
     if (params.skipHumann) {
       error "MEDI requires HUMAnN: remove --skipHumann or set --enable_medi false"
     }
+    if (params.humann_extraparams.contains('--bypass-translated-search')) {
+      error """\
+        MEDI is enabled but humann_extraparams contains --bypass-translated-search.
+        MEDI needs HUMAnN's fully-unaligned reads, which are only produced after
+        the Diamond translated search. Remove --bypass-translated-search and rerun.
+        """.stripIndent()
+    }
 
     // HUMAnN fully-unaligned reads: already QC'd, ~5–20% of original read count.
     // HUMAnN merges paired reads internally so these are always single-end FASTA.
