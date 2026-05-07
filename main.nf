@@ -306,29 +306,35 @@ Analysis introspection:
 
   // MEDI quantification workflow
   if (params.enable_medi) {
-    // Check that required MEDI parameters are set
     if (!params.medi_db_path || !params.medi_food_matches || !params.medi_food_contents) {
       error "MEDI quantification requires: medi_db_path, medi_food_matches, and medi_food_contents"
     }
-    
-    // Group raw reads (from FASTERQ_DUMP/local) by study for MEDI processing
-    // The MEDI subworkflow will handle fastp preprocessing internally
-    read_check.pass
-      .map{meta, reads, _count ->
-        // Create grouping metadata with study information
-        def group_meta = meta.subMap('run')  // Extract study grouping key
-        [group_meta, meta, reads]  // Use raw reads, not cleaned
+
+    // Route MEDI input: HUMAnN unmapped reads (shortcut) or full cleaned reads (fallback)
+    def medi_reads_ch = channel.empty()
+    if (!params.skipHumann) {
+      // Fully-unaligned reads after both nucleotide and translated search:
+      // already quality-filtered, typically 5–20% of the original read count.
+      // HUMAnN merges paired reads internally, so these are always single-end FASTA.
+      medi_reads_ch = profile_function.out.unmapped_reads
+        .map { meta, fa -> [meta + [single_end: true], [fa]] }
+    } else {
+      medi_reads_ch = merged_reads
+    }
+
+    medi_reads_ch
+      .map { meta, reads ->
+        def group_meta = meta.subMap('run')
+        [group_meta, meta, reads]
       }
-      .groupTuple(by: [0])  // Group by study
-      .map{group_meta, metas, reads_files ->
-        // Flatten back to individual sample format but maintain study grouping info
+      .groupTuple(by: [0])
+      .map { group_meta, metas, reads_files ->
         def study = group_meta.run
-        def samples = [metas, reads_files].transpose().collect{meta, reads -> [meta, reads]}
+        def samples = [metas, reads_files].transpose().collect { m, r -> [m, r] }
         [study, samples]
       }
-      .set{studies_with_samples}
-    
-    // Pass all studies to MEDI subworkflow - it will process each study group
+      .set { studies_with_samples }
+
     MEDI_QUANT(
       studies_with_samples,
       params.medi_food_matches,

@@ -80,6 +80,7 @@ process profile_function {
   tuple val(meta), path("*_3_reactions.tsv"), emit: profile_function_reactions
   tuple val(meta), path("*_4_pathabundance.tsv"), emit: profile_function_pa
   tuple val(meta), path("*_profile_functions_mqc.yaml"), emit: profile_function_log
+  tuple val(meta), path("*_unaligned.fa.gz"), emit: unmapped_reads, optional: true
 
   when:
   !params.skipHumann
@@ -100,7 +101,12 @@ process profile_function {
     --metaphlan-options "-t rel_ab_w_read_stats --index ${params.humann_metaphlan_id} --bowtie2db ${params.humann_metaphlan_db} --bt2_ps ${params.humann_bt2options}" \\
     --pathways metacyc \\
     --threads ${task.cpus * 2} \\
-    --memory-use minimum
+    --memory-use minimum \\
+    ${params.enable_medi ? '--remove-temp-output false' : ''}
+
+  # Extract fully-unaligned reads for MEDI shortcut (gzip for Kraken2 compatibility)
+  [ -f ${name}_humann_temp/${name}_unaligned.fa ] && \
+    gzip -c ${name}_humann_temp/${name}_unaligned.fa > ${name}_unaligned.fa.gz || true
 
   # MultiQC doesn't have a module for humann yet. As a consequence, I
   # had to create a YAML file with all the info I need via a bash script
