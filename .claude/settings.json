@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/guardrails.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(aws batch describe-compute-environments *)",
+      "Bash(aws batch list-jobs *)",
+      "Bash(aws ec2 describe-instances *)",
+      "Bash(aws s3 ls *)",
+      "Bash(aws cloudformation describe-stack-events *)",
+      "Bash(aws ec2 describe-launch-template-versions *)",
+      "Bash(aws batch describe-job-queues *)",
+      "Bash(aws cloudformation validate-template *)",
+      "Bash(aws cloudformation describe-stacks *)",
+      "Bash(aws ec2 describe-snapshots *)",
+      "Bash(aws ec2 get-console-output *)",
+      "Bash(aws cloudwatch list-metrics *)",
+      "Bash(aws iam list-attached-role-policies *)",
+      "Bash(aws ec2 describe-images *)",
+      "Bash(aws logs get-log-events *)",
+      "Bash(aws ec2 describe-launch-templates *)",
+      "Bash(aws batch describe-job-definitions *)",
+      "Bash(aws batch describe-jobs *)",
+      "Bash(screen -ls)"
+    ]
+  }
+}

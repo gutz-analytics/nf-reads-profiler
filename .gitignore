@@ -6,3 +6,11 @@ test/
 .nf-test*
 ramdisk_test/keys.sh
 ramdisk_test/
+# Results, including results_cjb
+results_*
+# Test results, from tests/nextflow.config
+test-out/
+# Local only for now
+logs/
+monkey-hand/
+pull_requests/

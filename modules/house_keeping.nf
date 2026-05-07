@@ -6,9 +6,9 @@
 */
 
 process get_software_versions {
-
   //Starting the biobakery container. I need to run metaphlan and Humann to get
   //their version number (due to the fact that they live in the same container)
+  conda "bioconda::multiqc=1.22"
   container params.docker_container_multiqc
 
   //input:
@@ -28,9 +28,10 @@ process get_software_versions {
   echo $workflow.nextflow.version > v_nextflow.txt
 
   echo $params.docker_container_fastp | cut -d: -f 2 > v_fastp.txt
-  echo $params.docker_container_humann3 | cut -d: -f 2 > v_humann.txt
+  echo $params.docker_container_humann4 | cut -d: -f 2 > v_humann.txt
   echo $params.docker_container_metaphlan | cut -d: -f 2 > v_metaphlan.txt
   echo $params.docker_container_multiqc | cut -d: -f 2 > v_multiqc.txt
+  echo $params.docker_container_hostile | cut -d: -f 2 > v_hostile.txt
 
   scrape_software_versions.py > software_versions_mqc.yaml
   """
@@ -39,16 +40,16 @@ process get_software_versions {
 
 process count_reads {
   tag "$name"
-  
+  conda "bioconda::fastp=1.2.0"
   container params.docker_container_fastp
-  
+
   publishDir "${params.outdir}/${params.project}/${run}/readcount", mode: 'copy', pattern: "*_readcount.txt"
 
   input:
   tuple val(meta), path(reads)
 
   output:
-  tuple val(meta), path(reads), env(READ_COUNT), emit: read_info
+  tuple val(meta), path(reads), env('READ_COUNT'), emit: read_info
   tuple val(meta), path("${name}_readcount.txt"), emit: read_count
   
   script:
@@ -65,7 +66,10 @@ process count_reads {
 process clean_reads {
   tag "$name"
   label "fastp"
+  conda "bioconda::fastp=1.2.0"
   container params.docker_container_fastp
+  cpus 4
+  memory 6.GB
 
   input:
   tuple val(meta), path(reads)
@@ -106,6 +110,49 @@ process clean_reads {
     """
   }
 }
+process HOSTILE {
+  tag "$name"
+  container params.docker_container_hostile
+  cpus 4
+  memory 4.GB
+
+  publishDir "${params.outdir}/${params.project}/${run}/dehosted", mode: 'copy', pattern: "*clean*.fastq.gz"
+
+  input:
+  tuple val(meta), path(reads)
+
+  output:
+  tuple val(meta), path("*.clean*.fastq.gz"), emit: reads_dehosted
+
+  script:
+  name = task.ext.name ?: "${meta.id}"
+  run  = task.ext.run  ?: "${meta.run}"
+  if (meta.single_end) {
+    """
+    export HOSTILE_CACHE_DIR=${params.hostile_db}
+    hostile clean \\
+      --fastq1 ${reads[0]} \\
+      --aligner bowtie2 \\
+      --aligner-args " --seed 1992 " \\
+      --output . \\
+      --airplane \\
+      --threads ${task.cpus}
+    """
+  } else {
+    """
+    export HOSTILE_CACHE_DIR=${params.hostile_db}
+    hostile clean \\
+      --fastq1 ${reads[0]} \\
+      --fastq2 ${reads[1]} \\
+      --aligner bowtie2 \\
+      --aligner-args " --seed 1992 " \\
+      --output . \\
+      --airplane \\
+      --threads ${task.cpus}
+    """
+  }
+}
+
 // ------------------------------------------------------------------------------
 //  MULTIQC LOGGING
 // ------------------------------------------------------------------------------
@@ -121,7 +168,7 @@ process clean_reads {
 process MULTIQC {
   tag "$run"
   publishDir "${params.outdir}/${params.project}/${run}/log", mode: 'copy'
-
+  conda "bioconda::multiqc=1.22"
   container params.docker_container_multiqc
 
   input:
@@ -129,10 +176,9 @@ process MULTIQC {
   tuple val(meta), path(data_files)
   path(multiqc_config)
   output:
-  path "multiqc_report.html"
-  path "multiqc_data"
+  path "nf-profile-reads-Report_multiqc_report.html"
+  path "nf-profile-reads-Report_multiqc_report_data/"
 
-  
   script:
   run = task.ext.run ?: "${meta.run}"
   """
