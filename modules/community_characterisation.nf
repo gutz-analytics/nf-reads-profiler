@@ -102,7 +102,7 @@ process profile_function {
     --pathways metacyc \\
     --threads ${task.cpus * 2} \\
     --memory-use minimum \\
-    ${params.enable_medi ? '--remove-temp-output false' : ''}
+    ${params.enable_medi ? '' : '--remove-temp-output'}
 
   # Extract fully-unaligned reads for MEDI shortcut (gzip for Kraken2 compatibility)
   [ -f ${name}_humann_temp/${name}_unaligned.fa ] && \
