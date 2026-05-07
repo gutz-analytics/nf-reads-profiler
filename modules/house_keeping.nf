@@ -114,7 +114,7 @@ process HOSTILE {
   tag "$name"
   container params.docker_container_hostile
   cpus 4
-  memory 8.GB // TODO: update based on the logs
+  memory 4.GB
 
   publishDir "${params.outdir}/${params.project}/${run}/dehosted", mode: 'copy', pattern: "*clean*.fastq.gz"
 
@@ -126,6 +126,7 @@ process HOSTILE {
 
   script:
   name = task.ext.name ?: "${meta.id}"
+  run  = task.ext.run  ?: "${meta.run}"
   if (meta.single_end) {
     """
     export HOSTILE_CACHE_DIR=${params.hostile_db}

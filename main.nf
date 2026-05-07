@@ -269,13 +269,22 @@ Analysis introspection:
 
   merged_reads = clean_reads.out.reads_cleaned
 
-  // profile taxa
+  // direct_metaphlan (outside of humann4)
   profile_taxa(merged_reads)
+
+  ch_metaphlan = profile_taxa.out.to_profile_function_bugs
+    .map { meta, table ->
+      def meta_new = meta - meta.subMap('id')
+      [meta_new, table]
+    }
+    .groupTuple(sort: true)
+
+  combine_metaphlan_tables(ch_metaphlan)
 
 
   ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
 
-  // Functional profiling (HUMAnN4) if not skipped
+  // HUMAnN4
   if (!params.skipHumann) {
     profile_function(ch_filtered_reads)
 
@@ -303,7 +312,7 @@ Analysis introspection:
       }
       .groupTuple(sort: true)
 
-    // HUMAnN-generated taxonomy profiles (separate from independent MetaPhlAn)
+    // HUMAnN4-generated taxonomy profiles, from matching databases
     ch_humann_taxonomy = profile_function.out.profile_function_metaphlan
       .map { meta, table ->
         def meta_new = meta - meta.subMap('id')
@@ -328,16 +337,6 @@ Analysis introspection:
     }
   }
 
-
-  // Metaphlan
-  ch_metaphlan = profile_taxa.out.to_profile_function_bugs
-    .map { meta, table ->
-      def meta_new = meta - meta.subMap('id')
-      [meta_new, table]
-    }
-    .groupTuple(sort: true)
-
-  combine_metaphlan_tables(ch_metaphlan)
 
   // MEDI quantification workflow
   if (params.enable_medi) {
