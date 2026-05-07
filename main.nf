@@ -309,20 +309,14 @@ Analysis introspection:
     if (!params.medi_db_path || !params.medi_food_matches || !params.medi_food_contents) {
       error "MEDI quantification requires: medi_db_path, medi_food_matches, and medi_food_contents"
     }
-
-    // Route MEDI input: HUMAnN unmapped reads (shortcut) or full cleaned reads (fallback)
-    def medi_reads_ch = channel.empty()
-    if (!params.skipHumann) {
-      // Fully-unaligned reads after both nucleotide and translated search:
-      // already quality-filtered, typically 5–20% of the original read count.
-      // HUMAnN merges paired reads internally, so these are always single-end FASTA.
-      medi_reads_ch = profile_function.out.unmapped_reads
-        .map { meta, fa -> [meta + [single_end: true], [fa]] }
-    } else {
-      medi_reads_ch = merged_reads
+    if (params.skipHumann) {
+      error "MEDI requires HUMAnN: remove --skipHumann or set --enable_medi false"
     }
 
-    medi_reads_ch
+    // HUMAnN fully-unaligned reads: already QC'd, ~5–20% of original read count.
+    // HUMAnN merges paired reads internally so these are always single-end FASTA.
+    profile_function.out.unmapped_reads
+      .map { meta, fa -> [meta + [single_end: true], [fa]] }
       .map { meta, reads ->
         def group_meta = meta.subMap('run')
         [group_meta, meta, reads]

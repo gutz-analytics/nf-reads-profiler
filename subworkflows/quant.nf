@@ -45,26 +45,14 @@ workflow MEDI_QUANT {
             .fromList(["D", "G", "S"])
             .set{levels}
 
-        // Flatten studies back to individual samples for processing
+        // Flatten studies back to individual samples for processing.
+        // Input is HUMAnN fully-unaligned reads: already QC'd, single-end gzipped FASTA.
         reads = studies_with_samples.flatMap{_study_id, samples ->
             samples.collect{meta, reads -> [meta, reads]}
         }
 
-        // Debug: Show incoming reads for each study
-        // reads.view { meta, reads_file -> "MEDI_QUANT received: Study=${meta.run}, Sample=${meta.id}, Files=${reads_file}" }
-
-        // Quality filtering with fastp (handles both single and paired-end reads)
-        preprocess(reads)
-
-        // Process each sample individually - no batching needed with ramdisk
-        kraken_input = preprocess.out
-            .map{meta, reads_files, _json, _html -> [meta, reads_files]}  // Extract meta and processed reads
-
-        // Debug: Show individual samples going to Kraken2
-        // kraken_input.view { meta, reads_files -> "MEDI Kraken2 input: Study=${meta.run}, Sample=${meta.id}, Files=${reads_files}" }
-        
-        // run Kraken2 per sample - maintains clean metadata flow
-        kraken(kraken_input)
+        // Run Kraken2 directly — no fastp preprocessing needed (reads are already QC'd)
+        kraken(reads)
 
         // Extract k2 files from kraken output (metadata preserved)
         kraken_k2_channel = kraken.out.map { meta, k2_file, _tsv_file -> [meta, k2_file] }
@@ -129,43 +117,6 @@ workflow MEDI_QUANT {
 }
 
 /* Process definitions */
-
-process preprocess {
-    tag "$name"
-    label 'low'
-    container params.docker_container_fastp
-    // publishDir "${params.outdir}/${params.project}/${run}/medi/preprocessed"
-    cpus 8
-
-    input:
-    tuple val(meta), path(reads)
-
-    output:
-    tuple val(meta),
-        path("${name}_filtered_R*.fastq.gz"),
-        path("${name}_fastp.json"),
-        path("${name}.html")
-
-    script:
-    name = task.ext.name ?: "${meta.id}"
-    // TODO: run is never called?
-    run = task.ext.run ?: "${meta.run}"
-    if (meta.single_end)
-        """
-        fastp -i ${reads[0]} -o ${name}_filtered_R1.fastq.gz \
-            --json ${name}_fastp.json --html ${name}.html \
-            --trim_front1 ${params.trim_front ?: 5} -l ${params.min_length ?: 50} \
-            -3 -M ${params.quality_threshold ?: 20} -r -w ${task.cpus}
-        """
-    else
-        """
-        fastp -i ${reads[0]} -I ${reads[1]} \
-            -o ${name}_filtered_R1.fastq.gz -O ${name}_filtered_R2.fastq.gz \
-            --json ${name}_fastp.json --html ${name}.html \
-            --trim_front1 ${params.trim_front ?: 5} -l ${params.min_length ?: 50} \
-            -3 -M ${params.quality_threshold ?: 20} -r -w ${task.cpus}
-        """
-}
 
 process kraken {
     tag "$name"
