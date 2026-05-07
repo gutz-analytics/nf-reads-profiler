@@ -148,7 +148,7 @@ covers our Graviton workers.
 
 ## Verification
 
-1. Run a small sample with and without `--skip_host_removal`
+1. Run a small sample with and without `--skipHostile`
 2. Compare read counts: decontaminated output should have fewer reads
 3. Check that `profile_taxa` output no longer shows `Homo_sapiens` as a
    significant fraction (if it did before)
@@ -158,25 +158,40 @@ covers our Graviton workers.
 
 ## Notes
 
-- The `skip_host_removal` flag allows bypassing for samples known to be
+- The `skipHostile` flag allows bypassing for samples known to be
   host-free (e.g. environmental metagenomes, food samples).
 - MultiQC should pick up the decontam log if formatted correctly; consider
   adding a custom content section.
 - This step adds ~15 min per sample to wall time. At 16K samples with
   MaxvCPUsSpot=16, this is negligible compared to HUMAnN's 4-6h.
-- **hostile index:** `human-t2t-hla` (bowtie2 variant, for paired-end short
-  reads). Download once with:
-  ```sh
-  docker run --rm -v ~/disk_dbs/hostile:/root/.local/share/hostile \
-    colinbrislawn/hostile:2.0.2 hostile index fetch --bowtie2
-  ```
-  Cache lives at `/root/.local/share/hostile` inside the container; mount
-  `~/disk_dbs/hostile` (local) or `/mnt/dbs/hostile` (AWS workers) to that
-  path and pass `--airplane` on all subsequent runs to skip the download check.
-  Index is ~4 GB — add to the existing `aws s3 sync` and AMI bake.
-- **sra-human-scrubber ARM64 path:** `aligns_to` source is in
-  `ncbi/ngs-tools` at `tools/tax/src/aligns_to.cpp`. If we want to run
-  sra-human-scrubber on Graviton, we could compile it from source in the
-  Dockerfile rather than using the pre-built x86 binary. Confirmed via smoke
-  test that the bioconda image fails at runtime on ARM64 with
-  `Exec format error`.
+- **Why hostile runs before fastp:** the `nreads` cap should apply to microbial
+  reads only. Dehosting first ensures the 32M cap isn't wasted on human reads.
+
+## DB pre-staging requirement (blocking for AWS)
+
+The `hostile` bowtie2 index (`human-t2t-hla`, ~4 GB) must be pre-staged at
+`/mnt/dbs/hostile` on each worker before the pipeline will run. The process
+script uses `--airplane` to skip the download check at runtime, so the index
+**must** already be present — the job will fail immediately if it is missing.
+
+**Stage locally** (one-time, then mount at `~/disk_dbs/hostile`):
+
+```sh
+docker run --rm \
+  -v ~/disk_dbs/hostile:/root/.local/share/hostile \
+  colinbrislawn/hostile:2.0.2 \
+  hostile index fetch --bowtie2
+```
+
+**For AWS workers (blocking — pipeline will not run without this):**
+
+1. Download the index to S3: copy `~/disk_dbs/hostile/` to the DB bucket under
+   a `hostile/` prefix.
+2. Add to the **AMI bake** (I14 Packer template): sync `s3://<db-bucket>/hostile/`
+   to `/mnt/dbs/hostile/` during the AMI build step.
+3. If still on the S3-sync-at-boot path: add `hostile/` to the launch template
+   `aws s3 sync` command.
+
+Until I14 is complete and the AMI includes the hostile index, every pilot or
+production run on AWS **must** either set `--skipHostile` or manually pre-stage
+the index on each worker.

@@ -71,7 +71,12 @@ rationale from ADR-001) is preserved.
 - Volume: 500 GiB gp3 encrypted (matches launch template)
 - Provisioners:
   1. Install Miniconda to `/opt/conda-aws`, install awscli, `conda clean`
-  2. Sync 4 DB directories from S3 to `/mnt/dbs/`
+  2. Sync DB directories from S3 to `/mnt/dbs/` — current list:
+     - `metaphlan_databases/vJan25/` (direct MetaPhlAn)
+     - `metaphlan_databases/vOct22/` (HUMAnN-matched MetaPhlAn)
+     - `humann/` (ChocoPhlAn, UniRef, utility maps)
+     - `hostile/` (~4 GB bowtie2 human-t2t-hla index; added by I11)
+     - `medi_db/` (Kraken2+Bracken food DB; only if MEDI enabled)
   3. Validate all directories have files
   4. Clean up temp files
 - Post-processor: write AMI ID to SSM `/nf-reads-profiler/ami-id`
