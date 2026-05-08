@@ -104,10 +104,12 @@ process profile_function {
     --memory-use minimum \\
     ${params.enable_medi ? '' : '--remove-temp-output'}
 
-  # Extract fully-unaligned reads for MEDI shortcut (gzip for Kraken2 compatibility)
-  # File is named *_diamond_unaligned.fa — reads that didn't map to either ChocoPhlAn or UniRef90
-  [ -f ${name}_humann_temp/${name}_diamond_unaligned.fa ] && \
-    gzip -c ${name}_humann_temp/${name}_diamond_unaligned.fa > ${name}_unaligned.fa.gz || true
+  # Extract pre-Diamond unaligned reads for MEDI (gzip for Kraken2 compatibility)
+  # bowtie2_unaligned.fa = reads that missed ChocoPhlAn but have NOT yet been searched
+  # against uniref90. Food organisms with known proteins survive here; they are removed
+  # by the Diamond step, which is why diamond_unaligned.fa produced zero food hits.
+  [ -f ${name}_humann_temp/${name}_bowtie2_unaligned.fa ] && \
+    gzip -c ${name}_humann_temp/${name}_bowtie2_unaligned.fa > ${name}_unaligned.fa.gz || true
 
   # MultiQC doesn't have a module for humann yet. As a consequence, I
   # had to create a YAML file with all the info I need via a bash script
