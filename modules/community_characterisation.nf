@@ -17,7 +17,7 @@ process profile_taxa {
   memory 38.GB
   cpus 4
 
-  publishDir "${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/taxa", mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
+  publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/taxa"}, mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
 
   input:
   tuple val(meta), path(reads)
