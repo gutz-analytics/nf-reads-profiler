@@ -26,6 +26,26 @@ aws batch submit-job \
 "--reads2","s3://czb-seqbot/fastqs/200817_NB501938_0185_AH23FNBGXG/MITI_Purification_Healthy/E8_SH0000236_0619-Cult-2-481_S22_R2_001.fastq.gz"
 ```
 
+## Local testing
+
+Run the test profile (Docker, small data) in a persistent `screen` session so the pipeline survives SSH disconnects:
+
+```bash
+screen -S nf-test
+nextflow run main.nf -profile test_medi
+# Detach:   Ctrl+A  D
+# Reattach: screen -r nf-test
+# List:     screen -ls
+```
+
+To watch progress from another terminal while it runs:
+
+```bash
+tail -f .nextflow.log
+```
+
+See `CLAUDE.md` for full pipeline architecture, parameter reference, DB layout, and AWS Batch infra notes. That file is the primary onboarding doc for both humans and AI assistants working in this repo.
+
 ## Databases
 
 Although the databases have been stored at the appropriate `/mnt/efs/databases` location mentioned in the config file. There might come a time when these need to be updated. Here is a quick view on how to do that.

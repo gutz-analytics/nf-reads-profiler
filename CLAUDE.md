@@ -13,8 +13,18 @@ microbiome quantification.
 ## Running the pipeline
 
 ```bash
-# Local (Docker, small test data)
+# Local — basic (Docker, small test data)
 nextflow run main.nf -profile test
+
+# Local — with MEDI shortcut (I13); use a screen session so SSH drops don't kill it
+screen -S nf-test
+nextflow run main.nf -profile test_medi -resume
+# Detach: Ctrl+A D  |  Reattach: screen -r nf-test
+
+# Monitor from another terminal
+tail -f .nextflow.log
+# or the tee'd log if launched via screen as above:
+tail -f /tmp/nf-test-medi.log
 
 # AWS Batch — primary production path
 nextflow run main.nf -profile aws \
@@ -29,6 +39,7 @@ Profile-to-config mapping is in `nextflow.config`:
 - `aws` → `conf/aws_batch.config` (s3 workDir, `awsbatch` executor, Graviton spot queue)
 - `azure` → `conf/azurebatch.config`
 - `test` → `conf/test.config` (local Docker, tiny `nreads`/`minreads`)
+- `test_medi` → `conf/test_medi.config` (extends `test`; enables MEDI, sets ssddbs paths, disables cleanup)
 
 ## Samplesheet schema
 
@@ -84,15 +95,14 @@ All profiles expect pre-staged databases; nothing is downloaded at runtime.
 | `medi_db_path` / `medi_food_matches` / `medi_food_contents` | MEDI Kraken2+Bracken DB and food metadata |
 
 Paths differ per profile:
-- Local / `test`: `/home/ubuntu/disk_dbs/...` (bind-mounted into Docker via
-  `docker.runOptions` in `nextflow.config`).
-- AWS: `/mnt/dbs/...` — currently populated by an EC2 Launch Template
-  `aws s3 sync` at boot (~20 min for 30k objects). Being migrated to a
-  pre-baked custom AMI (Packer) that eliminates the boot-time sync entirely.
-  See `issues/I14-custom-ami-worker.md` and `infra/adr-001-db-placement.md`
-  (superseded). The UserData stops the ECS agent before syncing and starts
-  it after, so workers only accept jobs once all databases (~65 GiB) are
-  present.
+- Local / `test_medi`: `/mnt/scratch/ssddbs/...` — synced from
+  `s3://cjb-gutz-s3-demo` to the instance-store RAID at `/mnt/scratch/ssddbs/`
+  (see `~/colin_notes_vm.md` sections 4–5). `docker.runOptions` in
+  `nextflow.config` bind-mounts this into Docker. vJan25 was installed via
+  `metaphlan --install` and is now in both ssddbs and S3.
+- AWS: `/mnt/dbs/...` — pre-baked custom AMI (Packer, see `issues/I14-custom-ami-worker.md`).
+  vJan25 baked in via `metaphlan --install` during AMI build (I21); vOct22
+  synced from S3. Workers boot ready in seconds with no runtime sync.
 
 `README.md` has the `docker run ... humann_databases --download` commands for
 rebuilding HUMAnN4/MetaPhlAn DBs when versions bump.
