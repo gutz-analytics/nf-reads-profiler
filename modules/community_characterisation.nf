@@ -109,7 +109,7 @@ process profile_function {
   # (protein). Fewer reads than bowtie2_unaligned; food organisms with uniref90 protein
   # hits are removed here. Testing this cut to characterise the memory/signal trade-off.
   [ -f ${name}_humann_temp/${name}_diamond_unaligned.fa ] && \
-    gzip -c ${name}_humann_temp/${name}_diamond_unaligned.fa > ${name}_unaligned.fa.gz || true
+    pigz -c ${name}_humann_temp/${name}_diamond_unaligned.fa > ${name}_unaligned.fa.gz || true
 
   # MultiQC doesn't have a module for humann yet. As a consequence, I
   # had to create a YAML file with all the info I need via a bash script
