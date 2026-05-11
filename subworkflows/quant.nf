@@ -41,21 +41,25 @@ workflow MEDI_QUANT {
         food_contents_file_path  // String path to food contents file on mounted filesystem
         
     main:
-        channel
+        Channel
             .fromList(["D", "G", "S"])
             .set{levels}
 
-        // Flatten studies back to individual samples for processing.
-        // Input is HUMAnN fully-unaligned reads: already QC'd, single-end gzipped FASTA.
-        reads = studies_with_samples.flatMap{_study_id, samples ->
+        // Flatten studies back to individual samples for processing
+        reads = studies_with_samples.flatMap{study_id, samples -> 
             samples.collect{meta, reads -> [meta, reads]}
         }
 
-        // Run Kraken2 directly — no fastp preprocessing needed (reads are already QC'd)
+        // Input is HUMAnN fully-unaligned reads: already QC'd, single-end FASTA.
+        // Skip fastp — reads have already passed HUMAnN's nucleotide + protein filters.
+        // Validated on SRP662258: more sensitive than full-read path (see I13).
+        // kraken_input.view { meta, reads_files -> "MEDI Kraken2 input: Study=${meta.run}, Sample=${meta.id}, Files=${reads_files}" }
+
+        // Run Kraken2 directly — no fastp preprocessing needed
         kraken(reads)
 
         // Extract k2 files from kraken output (metadata preserved)
-        kraken_k2_channel = kraken.out.map { meta, k2_file, _tsv_file -> [meta, k2_file] }
+        kraken_k2_channel = kraken.out.map { meta, k2_file, tsv_file -> [meta, k2_file] }
 
         // Debug: Show individual k2 files with preserved metadata
         // kraken_k2_channel.view { meta, k2_file -> "K2 File: Study=${meta.run}, Sample=${meta.id}, File=${k2_file.name}" }
@@ -83,7 +87,7 @@ workflow MEDI_QUANT {
         if (params.mapping ?: false) {
             // Get individual mappings
             summarize_mappings(architeuthis_filter.out)
-            summarize_mappings.out.map{_meta, file -> file}.collect() | merge_mappings
+            summarize_mappings.out.map{meta, file -> file}.collect() | merge_mappings
         }
 
         // Add taxon lineages
@@ -109,11 +113,11 @@ workflow MEDI_QUANT {
         multiqc(kraken_reports_by_study)
         
     emit:
-        food_abundance = quantify.out.map{row -> row[1]}
-        food_content = quantify.out.map{row -> row[2]}
+        food_abundance = quantify.out.map{it[1]}
+        food_content = quantify.out.map{it[2]}
         taxonomy_counts = add_lineage.out
         qc_report = multiqc.out
-        mappings = params.mapping ? merge_mappings.out : channel.empty()
+        mappings = params.mapping ? merge_mappings.out : Channel.empty()
 }
 
 /* Process definitions */
@@ -123,10 +127,9 @@ process kraken {
     label 'kraken'
     scratch false
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/medi/kraken2"}, mode: 'copy'
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2"
 
     // containerOptions '--volume /tmp/ramdisk:/tmp/ramdisk'
-    cpus 8
 
     input:
     tuple val(meta), path(reads)
@@ -147,8 +150,7 @@ process kraken {
     import time
 
     db_source = "${params.medi_db_path}"
-    # ramdisk_mount = "/tmp/ramdisk"  # Use the ramdisk created by startTask
-    ramdisk_mount = "/mnt/scratch/ssddbs/medi_db/" # Use nvme scratch
+    ramdisk_mount = "/tmp/ramdisk"  # Use the ramdisk created by startTask
     sample_name = "${name}"
     
     print(f"Processing sample: {sample_name}")
@@ -159,21 +161,75 @@ process kraken {
     # Check if ramdisk created by startTask is available
     use_ramdisk = False
     db_path = db_source  # Default to source path
+    
+    try:
+        # Check if the ramdisk from startTask is available
+        if os.path.ismount(ramdisk_mount):
+            print(f"Found existing ramdisk at {ramdisk_mount} (created by startTask)")
+            
+            # Create a subdirectory for this database to avoid conflicts
+            db_ramdisk_path = os.path.join(ramdisk_mount, "kraken_db")
+            os.makedirs(db_ramdisk_path, exist_ok=True)
+            
+            # Check if database files are already present in ramdisk
+            required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
+            missing_files = []
+            for req_file in required_files:
+                if not os.path.exists(os.path.join(db_ramdisk_path, req_file)):
+                    missing_files.append(req_file)
+            
+            if missing_files:
+                # Copy missing database files to ramdisk
+                print(f"Copying {len(missing_files)} missing database files to ramdisk...")
+                copy_start = time.time()
+                
+                for file_name in missing_files:
+                    src_path = os.path.join(db_source, file_name)
+                    dst_path = os.path.join(db_ramdisk_path, file_name)
+                    
+                    print(f"Copying {file_name}...")
+                    shutil.copy2(src_path, dst_path)
+                
+                copy_end = time.time()
+                print(f"Database copy completed in {copy_end - copy_start:.1f} seconds")
+            else:
+                print("Database files already present in ramdisk - skipping copy")
+            
+            # Verify all database files are now present
+            final_missing = []
+            for req_file in required_files:
+                if not os.path.exists(os.path.join(db_ramdisk_path, req_file)):
+                    final_missing.append(req_file)
+            
+            if final_missing:
+                print(f"Warning: Missing required files in ramdisk: {final_missing}")
+                raise Exception(f"Incomplete database setup: missing {final_missing}")
+            
+            use_ramdisk = True
+            db_path = db_ramdisk_path
+            print("Ramdisk database setup completed successfully")
+            
+        else:
+            print(f"No ramdisk found at {ramdisk_mount}, using direct database access")
+            
+    except Exception as e:
+        print(f"Failed to setup ramdisk: {e}")
+        print("Falling back to direct database access")
 
     # Process reads with kraken2
     base_args = [
         "kraken2", "--db", db_path,
         "--confidence", "${params.confidence ?: 0.3}",
         "--threads", "${task.cpus}",
+        # No --gzip-compressed: input is uncompressed .fa from HUMAnN diamond_unaligned
         "--output", f"{sample_name}.k2",
         "--report", f"{sample_name}.tsv"
     ]
-    
+
     # Add memory-mapping flag if using ramdisk (database already in memory)
-    # if use_ramdisk:
-    # Add it anyway!
-    base_args.append("--memory-mapping")
-    print("Using --memory-mapping flag (database in ramdisk)")
+    if use_ramdisk:
+        base_args.append("--memory-mapping")
+        print("Using --memory-mapping flag (database in ramdisk)")
 
     reads = "${reads}".split()
     
@@ -208,7 +264,7 @@ process architeuthis_filter {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/medi/kraken2"}, overwrite: true, mode: 'copy'
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
 
     input:
     tuple val(meta), path(k2)
@@ -232,7 +288,7 @@ process kraken_report {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/medi/kraken2"}, overwrite: true, mode: 'copy'
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
 
     input:
     tuple val(meta), path(k2)
@@ -252,7 +308,7 @@ process summarize_mappings {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/medi/architeuthis"}, overwrite: true, mode: 'copy'
+    publishDir "${params.outdir}/${params.project}/${run}/medi/architeuthis"
 
     input:
     tuple val(meta), path(k2)
@@ -272,7 +328,7 @@ process merge_mappings {
     tag "merge"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/medi"}, mode: "copy", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
 
     input:
     tuple val(meta), path(mappings)
@@ -291,7 +347,7 @@ process count_taxa {
     tag "${name}_${lev}"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${task.ext.run ?: meta.run}/medi/bracken"}, overwrite: true, mode: 'copy'
+    publishDir "${params.outdir}/${params.project}/${run}/medi/bracken", overwrite: true
 
     input:
     tuple val(meta), path(report), val(lev)
@@ -315,7 +371,7 @@ process quantify {
     tag "quantify"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${run}/medi"}, mode: "copy", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
 
     input:
     tuple val(run), path(files)
@@ -335,7 +391,7 @@ process merge_taxonomy {
     tag "${group_key.study}_${group_key.level}"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${group_key.study}/medi/merged"}, mode: "copy", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${group_key.study}/medi/merged", mode: "copy", overwrite: true
 
     input:
     tuple val(group_key), path(reports)
@@ -353,7 +409,7 @@ process add_lineage {
     tag "${group_key.study}_${group_key.level}"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${group_key.study}/medi"}, mode: "copy", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${group_key.study}/medi", mode: "copy", overwrite: true
 
     input:
     tuple val(group_key), path(merged)
@@ -372,7 +428,7 @@ process multiqc {
     tag "multiqc"
     label 'low'
     container params.docker_container_multiqc
-    publishDir {"${params.outdir}/${params.project}/${run}/medi"}, mode: "copy", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
 
     input:
     tuple val(run), path(reports)
