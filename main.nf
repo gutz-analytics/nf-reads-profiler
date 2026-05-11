@@ -47,85 +47,6 @@ nf-reads-profiler supports FASTQ and compressed FASTQ files.
 """
 }
 
-/**
-Prints version when asked for
-*/
-
-// Ensure skipHumann is a boolean
-params.skipHumann = params.skipHumann ? params.skipHumann.toString().toBoolean() : false
-
-//Creates working dir
-workingpath = params.outdir + "/" + params.project
-workingdir = file(workingpath)
-if( !workingdir.exists() ) {
-  if( !workingdir.mkdirs() )  {
-    exit 1, "Cannot create working directory: $workingpath"
-  }
-}
-
-
-// Header log info
-log.info """---------------------------------------------
-nf-reads-profiler
----------------------------------------------
-
-Analysis introspection:
-
-"""
-
-def summary = [:]
-
-summary['Starting time'] = new java.util.Date()
-//Environment
-summary['Environment'] = ""
-summary['Pipeline Name'] = 'nf-reads-profiler'
-summary['Pipeline Version'] = workflow.manifest.version
-
-summary['Config Profile'] = workflow.profile
-summary['Resumed'] = workflow.resume
-
-summary['Nextflow version'] = nextflow.version.toString() + " build " + nextflow.build.toString() + " (" + nextflow.timestamp + ")"
-
-summary['Java version'] = System.getProperty("java.version")
-summary['Java Virtual Machine'] = System.getProperty("java.vm.name") + "(" + System.getProperty("java.vm.version") + ")"
-
-summary['Operating system'] = System.getProperty("os.name") + " " + System.getProperty("os.arch") + " v" +  System.getProperty("os.version")
-summary['User name'] = System.getProperty("user.name") //User's account name
-
-summary['Container Engine'] = workflow.containerEngine
-if(workflow.containerEngine) summary['Container'] = workflow.container
-summary['HUMAnN'] = params.docker_container_humann3
-summary['MetaPhlAn'] = params.docker_container_metaphlan
-summary['MultiQC'] = params.docker_container_multiqc
-
-//General
-summary['Running parameters'] = ""
-summary['Sample Sheet'] = params.input
-summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
-summary['Data Type'] = params.rna ? 'Metatranscriptomic' : 'Metagenomic'
-summary['Merge Reads'] = params.mergeReads
-
-//BowTie2 databases for metaphlan
-summary['MetaPhlAn parameters'] = ""
-summary['MetaPhlAn database'] = params.metaphlan_db
-summary['Bowtie2 options'] = params.bt2options
-
-// ChocoPhlAn and UniRef databases
-summary['HUMAnN parameters'] = ""
-summary['Taxonomic Profile'] = params.taxonomic_profile
-summary['Chocophlan database'] = params.chocophlan
-summary['Uniref database'] = params.uniref
-
-//Folders
-summary['Folders'] = ""
-summary['Output dir'] = workingpath
-summary['Working dir'] = workflow.workDir
-summary['Output dir'] = params.outdir
-summary['Script dir'] = workflow.projectDir
-summary['Lunching dir'] = workflow.launchDir
-
-log.info summary.collect { k,v -> "${k.padRight(27)}: $v" }.join("\n")
-log.info ""
 
 
 /**
@@ -166,6 +87,11 @@ def output_exists(meta) {
 workflow {
   if (params.version) { versionMessage(); exit 0 }
   if (params.help)    { helpMessage();    exit 0 }
+
+  log.info """\
+    [PIPELINE] nf-reads-profiler ${workflow.manifest.version} | profile=${workflow.profile}
+    [WORKDIR]  ${workflow.workDir}
+    """.stripIndent()
 
   // Parse input samplesheet using nf-validation plugin
   Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
