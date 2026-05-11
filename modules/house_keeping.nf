@@ -6,9 +6,9 @@
 */
 
 process get_software_versions {
-
   //Starting the biobakery container. I need to run metaphlan and Humann to get
   //their version number (due to the fact that they live in the same container)
+  conda "bioconda::multiqc=1.22"
   container params.docker_container_multiqc
 
   //input:
@@ -28,7 +28,7 @@ process get_software_versions {
   echo $workflow.nextflow.version > v_nextflow.txt
 
   echo $params.docker_container_fastp | cut -d: -f 2 > v_fastp.txt
-  echo $params.docker_container_humann3 | cut -d: -f 2 > v_humann.txt
+  echo $params.docker_container_humann4 | cut -d: -f 2 > v_humann.txt
   echo $params.docker_container_metaphlan | cut -d: -f 2 > v_metaphlan.txt
   echo $params.docker_container_multiqc | cut -d: -f 2 > v_multiqc.txt
 
@@ -39,16 +39,16 @@ process get_software_versions {
 
 process count_reads {
   tag "$name"
-  
+  conda "bioconda::fastp=1.2.0"
   container params.docker_container_fastp
-  
+
   publishDir "${params.outdir}/${params.project}/${run}/readcount", mode: 'copy', pattern: "*_readcount.txt"
 
   input:
   tuple val(meta), path(reads)
 
   output:
-  tuple val(meta), path(reads), env(READ_COUNT), emit: read_info
+  tuple val(meta), path(reads), env('READ_COUNT'), emit: read_info
   tuple val(meta), path("${name}_readcount.txt"), emit: read_count
   
   script:
@@ -65,7 +65,9 @@ process count_reads {
 process clean_reads {
   tag "$name"
   label "fastp"
+  conda "bioconda::fastp=1.2.0"
   container params.docker_container_fastp
+  cpus 4
 
   input:
   tuple val(meta), path(reads)
@@ -121,7 +123,7 @@ process clean_reads {
 process MULTIQC {
   tag "$run"
   publishDir "${params.outdir}/${params.project}/${run}/log", mode: 'copy'
-
+  conda "bioconda::multiqc=1.22"
   container params.docker_container_multiqc
 
   input:
@@ -129,10 +131,9 @@ process MULTIQC {
   tuple val(meta), path(data_files)
   path(multiqc_config)
   output:
-  path "multiqc_report.html"
-  path "multiqc_data"
+  path "nf-profile-reads-Report_multiqc_report.html"
+  path "nf-profile-reads-Report_multiqc_report_data/"
 
-  
   script:
   run = task.ext.run ?: "${meta.run}"
   """

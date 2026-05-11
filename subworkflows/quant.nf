@@ -41,12 +41,12 @@ workflow MEDI_QUANT {
         food_contents_file_path  // String path to food contents file on mounted filesystem
         
     main:
-        Channel
+        channel
             .fromList(["D", "G", "S"])
             .set{levels}
 
         // Flatten studies back to individual samples for processing
-        reads = studies_with_samples.flatMap{study_id, samples -> 
+        reads = studies_with_samples.flatMap{_study_id, samples ->
             samples.collect{meta, reads -> [meta, reads]}
         }
 
@@ -58,7 +58,7 @@ workflow MEDI_QUANT {
 
         // Process each sample individually - no batching needed with ramdisk
         kraken_input = preprocess.out
-            .map{meta, reads_files, json, html -> [meta, reads_files]}  // Extract meta and processed reads
+            .map{meta, reads_files, _json, _html -> [meta, reads_files]}  // Extract meta and processed reads
 
         // Debug: Show individual samples going to Kraken2
         // kraken_input.view { meta, reads_files -> "MEDI Kraken2 input: Study=${meta.run}, Sample=${meta.id}, Files=${reads_files}" }
@@ -67,7 +67,7 @@ workflow MEDI_QUANT {
         kraken(kraken_input)
 
         // Extract k2 files from kraken output (metadata preserved)
-        kraken_k2_channel = kraken.out.map { meta, k2_file, tsv_file -> [meta, k2_file] }
+        kraken_k2_channel = kraken.out.map { meta, k2_file, _tsv_file -> [meta, k2_file] }
 
         // Debug: Show individual k2 files with preserved metadata
         // kraken_k2_channel.view { meta, k2_file -> "K2 File: Study=${meta.run}, Sample=${meta.id}, File=${k2_file.name}" }
@@ -95,7 +95,7 @@ workflow MEDI_QUANT {
         if (params.mapping ?: false) {
             // Get individual mappings
             summarize_mappings(architeuthis_filter.out)
-            summarize_mappings.out.map{meta, file -> file}.collect() | merge_mappings
+            summarize_mappings.out.map{_meta, file -> file}.collect() | merge_mappings
         }
 
         // Add taxon lineages
@@ -121,11 +121,11 @@ workflow MEDI_QUANT {
         multiqc(kraken_reports_by_study)
         
     emit:
-        food_abundance = quantify.out.map{it[1]}
-        food_content = quantify.out.map{it[2]}
+        food_abundance = quantify.out.map{row -> row[1]}
+        food_content = quantify.out.map{row -> row[2]}
         taxonomy_counts = add_lineage.out
         qc_report = multiqc.out
-        mappings = params.mapping ? merge_mappings.out : Channel.empty()
+        mappings = params.mapping ? merge_mappings.out : channel.empty()
 }
 
 /* Process definitions */
@@ -134,7 +134,8 @@ process preprocess {
     tag "$name"
     label 'low'
     container params.docker_container_fastp
-    publishDir "${params.outdir}/${params.project}/${run}/medi/preprocessed"
+    // publishDir "${params.outdir}/${params.project}/${run}/medi/preprocessed"
+    cpus 8
 
     input:
     tuple val(meta), path(reads)
@@ -147,6 +148,7 @@ process preprocess {
 
     script:
     name = task.ext.name ?: "${meta.id}"
+    // TODO: run is never called?
     run = task.ext.run ?: "${meta.run}"
     if (meta.single_end)
         """
@@ -170,9 +172,10 @@ process kraken {
     label 'kraken'
     scratch false
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2"
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", mode: 'copy'
 
-    containerOptions '--volume /tmp/ramdisk:/tmp/ramdisk'
+    // containerOptions '--volume /tmp/ramdisk:/tmp/ramdisk'
+    cpus 8
 
     input:
     tuple val(meta), path(reads)
@@ -193,7 +196,8 @@ process kraken {
     import time
 
     db_source = "${params.medi_db_path}"
-    ramdisk_mount = "/tmp/ramdisk"  # Use the ramdisk created by startTask
+    # ramdisk_mount = "/tmp/ramdisk"  # Use the ramdisk created by startTask
+    ramdisk_mount = "/mnt/scratch/ssddbs/medi_db/" # Use nvme scratch
     sample_name = "${name}"
     
     print(f"Processing sample: {sample_name}")
@@ -204,60 +208,6 @@ process kraken {
     # Check if ramdisk created by startTask is available
     use_ramdisk = False
     db_path = db_source  # Default to source path
-    
-    try:
-        # Check if the ramdisk from startTask is available
-        if os.path.ismount(ramdisk_mount):
-            print(f"Found existing ramdisk at {ramdisk_mount} (created by startTask)")
-            
-            # Create a subdirectory for this database to avoid conflicts
-            db_ramdisk_path = os.path.join(ramdisk_mount, "kraken_db")
-            os.makedirs(db_ramdisk_path, exist_ok=True)
-            
-            # Check if database files are already present in ramdisk
-            required_files = ["hash.k2d", "opts.k2d", "taxo.k2d"]
-            missing_files = []
-            for req_file in required_files:
-                if not os.path.exists(os.path.join(db_ramdisk_path, req_file)):
-                    missing_files.append(req_file)
-            
-            if missing_files:
-                # Copy missing database files to ramdisk
-                print(f"Copying {len(missing_files)} missing database files to ramdisk...")
-                copy_start = time.time()
-                
-                for file_name in missing_files:
-                    src_path = os.path.join(db_source, file_name)
-                    dst_path = os.path.join(db_ramdisk_path, file_name)
-                    
-                    print(f"Copying {file_name}...")
-                    shutil.copy2(src_path, dst_path)
-                
-                copy_end = time.time()
-                print(f"Database copy completed in {copy_end - copy_start:.1f} seconds")
-            else:
-                print("Database files already present in ramdisk - skipping copy")
-            
-            # Verify all database files are now present
-            final_missing = []
-            for req_file in required_files:
-                if not os.path.exists(os.path.join(db_ramdisk_path, req_file)):
-                    final_missing.append(req_file)
-            
-            if final_missing:
-                print(f"Warning: Missing required files in ramdisk: {final_missing}")
-                raise Exception(f"Incomplete database setup: missing {final_missing}")
-            
-            use_ramdisk = True
-            db_path = db_ramdisk_path
-            print("Ramdisk database setup completed successfully")
-            
-        else:
-            print(f"No ramdisk found at {ramdisk_mount}, using direct database access")
-            
-    except Exception as e:
-        print(f"Failed to setup ramdisk: {e}")
-        print("Falling back to direct database access")
 
     # Process reads with kraken2
     base_args = [
@@ -270,9 +220,10 @@ process kraken {
     ]
     
     # Add memory-mapping flag if using ramdisk (database already in memory)
-    if use_ramdisk:
-        base_args.append("--memory-mapping")
-        print("Using --memory-mapping flag (database in ramdisk)")
+    # if use_ramdisk:
+    # Add it anyway!
+    base_args.append("--memory-mapping")
+    print("Using --memory-mapping flag (database in ramdisk)")
 
     reads = "${reads}".split()
     
@@ -307,7 +258,7 @@ process architeuthis_filter {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true, mode: 'copy'
 
     input:
     tuple val(meta), path(k2)
@@ -331,7 +282,7 @@ process kraken_report {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true, mode: 'copy'
 
     input:
     tuple val(meta), path(k2)
@@ -351,7 +302,7 @@ process summarize_mappings {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/architeuthis"
+    publishDir "${params.outdir}/${params.project}/${run}/medi/architeuthis", overwrite: true, mode: 'copy'
 
     input:
     tuple val(meta), path(k2)
@@ -390,7 +341,7 @@ process count_taxa {
     tag "${name}_${lev}"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/bracken", overwrite: true
+    publishDir "${params.outdir}/${params.project}/${run}/medi/bracken", overwrite: true, mode: 'copy'
 
     input:
     tuple val(meta), path(report), val(lev)

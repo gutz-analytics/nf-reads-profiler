@@ -214,8 +214,8 @@ Some test data is generated during test execution:
 ### Test Database Setup
 For workflow tests, minimal test databases are required in `assets/test_dbs/`:
 - MetaPhlAn4 test database
-- HUMAnN3 ChocoPhlAn database (minimal)
-- HUMAnN3 UniRef database (minimal)
+- HUMAnN4 ChocoPhlAn database (minimal)
+- HUMAnN4 UniRef database (minimal)
 - Utility mapping files
 
 ## Continuous Integration

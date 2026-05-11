@@ -1,26 +1,48 @@
-# Updating the image on ECR
+# Docker readme
 
-## Building and tagging
+## Setup
 
-```bash
-docker build --no-cache -t 458432034220.dkr.ecr.us-west-2.amazonaws.com/biobakery/workflows:maf-20221028-a1 .
-# docker tag biobakery/workflows:maf-20221028-a1 458432034220.dkr.ecr.us-west-2.amazonaws.com/biobakery/workflows:maf-20221028-a1
+```sh
+docker login
+# I opened the web browser and logged in with GitHub
+
+# Set up multiplatform builds, see
+# https://forums.docker.com/t/error-multiple-platforms-feature-is-currently-not-supported-for-docker-driver/124811/12
+docker buildx ls
+docker buildx create --name multiarch --driver docker-container --use
+docker buildx ls
 ```
 
-## Pushing to ECR
+## Buildx
 
-```bash
-docker push 458432034220.dkr.ecr.us-west-2.amazonaws.com/biobakery/workflows:maf-20221028-a1
+Note that the final argument is the path to the folder with the Dockerfile, not the name of the image. The name of the image is set with the -t flag.
+
+```sh
+cd docker
+
+# Build and push multi-arch (amd64 + arm64)
+docker buildx build --platform linux/amd64,linux/arm64 -t colinbrislawn/aws-cli-bash:2 --push aws-cli-bash
+docker buildx build --platform linux/amd64,linux/arm64 -t colinbrislawn/sra-tools-bash:3.0.7 --push sra-tools-bash
+docker buildx build --platform linux/arm64 -t colinbrislawn/metaphlan:4.2.4 --push metaphlan
+docker buildx build --platform linux/arm64 -t colinbrislawn/medi:0.2.1 --push medi
 ```
 
-## Troubleshooting
+## View images we can give to Nextlow
 
-If the push doesn not work. Try the following command on your terminal:
-
-```bash
-sudo yum install -y amazon-efs-utils amazon-ecr-credential-helper
-mkdir ${HOME}/.docker
-echo '{"credsStore": "ecr-login"}' > ${HOME}/.docker/config.json
+```sh
+docker search colinbrislawn
 ```
 
-now retry the push command.
+## Extra!
+
+```sh
+# View all local images on this machine
+docker image ls
+
+# Remove a local image
+# be specific with REPOSITORY:TAG
+docker image rm hello-world:latest
+docker image rm lightweightlabware/aws-cli-bash:ubuntu
+docker image rm amazon/aws-cli
+
+```
