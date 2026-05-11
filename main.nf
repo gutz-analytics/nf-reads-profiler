@@ -50,19 +50,6 @@ nf-reads-profiler supports FASTQ and compressed FASTQ files.
 /**
 Prints version when asked for
 */
-if (params.version) {
-  versionMessage()
-  exit 0
-}
-
-/**
-Prints help when asked for
-*/
-
-if (params.help) {
-  helpMessage()
-  exit 0
-}
 
 // Ensure skipHumann is a boolean
 params.skipHumann = params.skipHumann ? params.skipHumann.toString().toBoolean() : false
@@ -177,6 +164,9 @@ def output_exists(meta) {
 
 
 workflow {
+  if (params.version) { versionMessage(); exit 0 }
+  if (params.help)    { helpMessage();    exit 0 }
+
   // Parse input samplesheet using nf-validation plugin
   Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
       .branch {
