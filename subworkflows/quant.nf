@@ -164,8 +164,7 @@ process kraken {
     base_args = [
         "kraken2", "--db", db_path,
         "--confidence", "${params.confidence ?: 0.3}",
-        "--threads", "${task.cpus}", 
-        "--gzip-compressed",
+        "--threads", "${task.cpus}",
         "--output", f"{sample_name}.k2",
         "--report", f"{sample_name}.tsv"
     ]

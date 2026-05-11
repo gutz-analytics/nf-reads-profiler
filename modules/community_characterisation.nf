@@ -80,7 +80,7 @@ process profile_function {
   tuple val(meta), path("*_3_reactions.tsv"), emit: profile_function_reactions
   tuple val(meta), path("*_4_pathabundance.tsv"), emit: profile_function_pa
   tuple val(meta), path("*_profile_functions_mqc.yaml"), emit: profile_function_log
-  tuple val(meta), path("*_unaligned.fa.gz"), emit: unmapped_reads, optional: true
+  tuple val(meta), path("*_unaligned.fa"), emit: unmapped_reads, optional: true
 
   when:
   !params.skipHumann
@@ -104,12 +104,16 @@ process profile_function {
     --memory-use minimum \\
     ${params.enable_medi ? '' : '--remove-temp-output'}
 
-  # Extract post-Diamond unaligned reads for MEDI (gzip for Kraken2 compatibility)
-  # diamond_unaligned.fa = reads that missed both ChocoPhlAn (nucleotide) AND uniref90
-  # (protein). Fewer reads than bowtie2_unaligned; food organisms with uniref90 protein
-  # hits are removed here. Testing this cut to characterise the memory/signal trade-off.
-  [ -f ${name}_humann_temp/${name}_diamond_unaligned.fa ] && \
-    pigz -c ${name}_humann_temp/${name}_diamond_unaligned.fa > ${name}_unaligned.fa.gz || true
+  # Copy diamond_unaligned reads out of HUMAnN temp dir for MEDI.
+  # diamond_unaligned.fa = reads that missed ChocoPhlAn (nucleotide) AND uniref90 (protein).
+  # Validated on SRP662258: identical food detections to bowtie2_unaligned, 6-16% fewer
+  # reads — preferred for production (see issue I13). Uncompressed: Kraken2 reads .fa natively.
+  if [ -f ${name}_humann_temp/${name}_diamond_unaligned.fa ]; then
+    if [ ! -s ${name}_humann_temp/${name}_diamond_unaligned.fa ]; then
+      echo "WARNING: diamond_unaligned.fa is empty for ${name} — no reads survived Diamond filter. MEDI will receive no input." >&2
+    fi
+    cp ${name}_humann_temp/${name}_diamond_unaligned.fa ${name}_unaligned.fa
+  fi
 
   # MultiQC doesn't have a module for humann yet. As a consequence, I
   # had to create a YAML file with all the info I need via a bash script
