@@ -41,7 +41,7 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
     --taxonomic_profile   path    s3path to precalculate metaphlan3 taxonomic profile output.
     --chocophlan          path    folder for the ChocoPhlAn database
     --uniref              path    folder for the UniRef database
-    --annotation  <true|false>   whether annotation is enabled (default: false)
+
 
 nf-reads-profiler supports FASTQ and compressed FASTQ files.
 """
@@ -271,7 +271,7 @@ workflow {
   }
 
   // Split stratified tables for biom files
-  if (!params.skipHumann && params.annotation) {
+  if (!params.skipHumann) {
 
     
 

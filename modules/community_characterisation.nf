@@ -87,7 +87,7 @@ process profile_function {
   tuple val(meta), path("*_unaligned.fa"), emit: unmapped_reads, optional: true
 
   when:
-  params.annotation
+  !params.skipHumann
 
   script:
   name = task.ext.name ?: "${meta.id}"
@@ -141,7 +141,7 @@ process combine_humann_tables {
   tuple val(meta), path('*_combined.tsv')
 
   when:
-  params.annotation
+  !params.skipHumann
 
   script:
 
@@ -264,7 +264,7 @@ process convert_tables_to_biom {
   tuple val(meta), path("*.biom"), emit: biom_files
 
   when:
-  params.annotation
+  !params.skipHumann
 
   script:
   run = task.ext.run ?: "${meta.run}"
@@ -295,7 +295,7 @@ process split_stratified_tables {
   tuple val(meta), path("*_unstratified.tsv"), emit: unstratified_tables
 
   when:
-  params.annotation
+  !params.skipHumann
 
   script:
   run = task.ext.run ?: "${meta.run}"
@@ -329,7 +329,7 @@ process regroup_genefamilies {
   tuple val(meta), path("*.biom"), emit: regrouped_bioms
 
   when:
-  params.annotation && params.process_humann_tables && meta.type == 'genefamilies'
+  !params.skipHumann && params.process_humann_tables && meta.type == 'genefamilies'
 
   script:
   run = task.ext.run ?: "${meta.run}"
