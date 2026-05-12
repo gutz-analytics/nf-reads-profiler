@@ -127,7 +127,7 @@ process kraken {
     label 'kraken'
     scratch false
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2"
+    publishDir {"${params.outdir}/${params.project}/${run}/medi/kraken2"}
 
     // containerOptions '--volume /tmp/ramdisk:/tmp/ramdisk'
 
@@ -264,7 +264,7 @@ process architeuthis_filter {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${run}/medi/kraken2"}, overwrite: true
 
     input:
     tuple val(meta), path(k2)
@@ -288,7 +288,7 @@ process kraken_report {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/kraken2", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${run}/medi/kraken2"}, overwrite: true
 
     input:
     tuple val(meta), path(k2)
@@ -308,7 +308,7 @@ process summarize_mappings {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/architeuthis"
+    publishDir {"${params.outdir}/${params.project}/${run}/medi/architeuthis"}
 
     input:
     tuple val(meta), path(k2)
@@ -328,7 +328,7 @@ process merge_mappings {
     tag "merge"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${run}/medi"}, mode: "copy", overwrite: true
 
     input:
     tuple val(meta), path(mappings)
@@ -347,7 +347,7 @@ process count_taxa {
     tag "${name}_${lev}"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi/bracken", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${run}/medi/bracken"}, overwrite: true
 
     input:
     tuple val(meta), path(report), val(lev)
@@ -371,7 +371,7 @@ process quantify {
     tag "quantify"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${run}/medi"}, mode: "copy", overwrite: true
 
     input:
     tuple val(run), path(files)
@@ -391,7 +391,7 @@ process merge_taxonomy {
     tag "${group_key.study}_${group_key.level}"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${group_key.study}/medi/merged", mode: "copy", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${group_key.study}/medi/merged"}, mode: "copy", overwrite: true
 
     input:
     tuple val(group_key), path(reports)
@@ -409,7 +409,7 @@ process add_lineage {
     tag "${group_key.study}_${group_key.level}"
     label 'low'
     container params.docker_container_medi
-    publishDir "${params.outdir}/${params.project}/${group_key.study}/medi", mode: "copy", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${group_key.study}/medi"}, mode: "copy", overwrite: true
 
     input:
     tuple val(group_key), path(merged)
@@ -428,7 +428,7 @@ process multiqc {
     tag "multiqc"
     label 'low'
     container params.docker_container_multiqc
-    publishDir "${params.outdir}/${params.project}/${run}/medi", mode: "copy", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${run}/medi"}, mode: "copy", overwrite: true
 
     input:
     tuple val(run), path(reports)
@@ -446,7 +446,7 @@ process convert_medi_to_biom {
     tag "${run}"
     label 'low'
     container params.docker_container_metaphlan
-    publishDir "${params.outdir}/${params.project}/combined_bioms/medi", mode: "copy", overwrite: true
+    publishDir {"${params.outdir}/${params.project}/combined_bioms/medi"}, mode: "copy", overwrite: true
 
     input:
     tuple val(run), path(food_abundance), path(food_content)
