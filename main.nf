@@ -34,13 +34,13 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
 
   Other options:
   MetaPhlAn parameters for taxa profiling:
-    --metaphlan_db path   folder for the MetaPhlAn database
+    --direct_metaphlan_db path   folder for the MetaPhlAn database
     --bt2options          value   BowTie2 options
 
   HUMANn parameters for functional profiling:
     --taxonomic_profile   path    s3path to precalculate metaphlan3 taxonomic profile output.
-    --chocophlan          path    folder for the ChocoPhlAn database
-    --uniref              path    folder for the UniRef database
+    --humann_chocophlan          path    folder for the ChocoPhlAn database
+    --humann_uniref              path    folder for the UniRef database
 
 
 nf-reads-profiler supports FASTQ and compressed FASTQ files.
@@ -247,8 +247,8 @@ workflow {
   // MEDI quantification workflow — I13 shortcut: diamond_unaligned → Kraken2 directly.
   // Reads have already passed HUMAnN's nucleotide + protein filters; no fastp needed.
   if (params.enable_medi) {
-    if (!params.medi_db_path || !params.medi_foods_file || !params.medi_food_contents_file) {
-      error "MEDI quantification requires: medi_db_path, medi_foods_file, and medi_food_contents_file parameters"
+    if (!params.medi_db_path || !params.medi_food_matches || !params.medi_food_contents) {
+      error "MEDI quantification requires: medi_db_path, medi_food_matches, and medi_food_contents parameters"
     }
     if (params.skipHumann) {
       error "enable_medi requires skipHumann=false — MEDI uses HUMAnN diamond_unaligned reads"
@@ -266,8 +266,8 @@ workflow {
 
     MEDI_QUANT(
       studies_with_samples,
-      params.medi_foods_file,
-      params.medi_food_contents_file
+      params.medi_food_matches,
+      params.medi_food_contents
     )
   }
 

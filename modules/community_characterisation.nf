@@ -14,7 +14,9 @@ process profile_taxa {
 
   tag "$name"
 
-  //Enable multicontainer settings
+  // CPUs: request N from the scheduler, run with 2N internally (--nproc task.cpus * 2).
+  // Bowtie2 alignment is partially single-threaded; overprovisioning lets it burst
+  // onto idle cores without reserving them from the queue.
   container params.docker_container_metaphlan
 
   publishDir {"${params.outdir}/${params.project}/${run}/taxa"}, mode: 'copy', pattern: "*.{biom,tsv,txt,bz2}"
@@ -34,17 +36,17 @@ process profile_taxa {
   name = task.ext.name ?: "${meta.id}"
   run = task.ext.run ?: "${meta.run}"
   """
-  echo ${params.metaphlan_db}
+  echo ${params.direct_metaphlan_db}
 
   metaphlan \\
     --input_type fastq \\
     --tmp_dir . \\
-    --index ${params.metaphlan_index} \\
-    --db_dir ${params.metaphlan_db} \\
+    --index ${params.direct_metaphlan_id} \\
+    --db_dir ${params.direct_metaphlan_db} \\
     --bt2_ps ${params.bt2options} \\
     --sample_id ${name} \\
     --biom_format_output \\
-    --nproc ${task.cpus} \\
+    --nproc ${task.cpus * 2} \\
     --no_map \\
     --output_file ${name}_metaphlan.biom \\
     $reads \\
@@ -62,14 +64,16 @@ process profile_taxa {
 */
 
 // Defines channels for bowtie2_metaphlan_databases file
-// Channel.fromPath( params.chocophlan, type: 'dir', checkIfExists: true ).set { chocophlan_databases }
-// Channel.fromPath( params.uniref, type: 'dir', checkIfExists: true ).set { uniref_databases }
+// Channel.fromPath( params.humann_chocophlan, type: 'dir', checkIfExists: true ).set { chocophlan_databases }
+// Channel.fromPath( params.humann_uniref, type: 'dir', checkIfExists: true ).set { uniref_databases }
 
 process profile_function {
 
   tag "$name"
 
-  //Enable multicontainer settings
+  // CPUs: request N from the scheduler, run with 2N internally (--threads task.cpus * 2).
+  // HUMAnN is partially single-threaded; overprovisioning lets it burst onto idle cores
+  // without reserving them from the queue.
   container params.docker_container_humann4
 
   publishDir {"${params.outdir}/${params.project}/${run}/function" }, mode: 'copy', pattern: "*.{tsv,log}"
@@ -84,7 +88,7 @@ process profile_function {
   tuple val(meta), path("*_3_reactions.tsv"), emit: profile_function_reactions
   tuple val(meta), path("*_4_pathabundance.tsv"), emit: profile_function_pa
   tuple val(meta), path("*_profile_functions_mqc.yaml"), emit: profile_function_log
-  tuple val(meta), path("*_unaligned.fa"), emit: unmapped_reads, optional: true
+  tuple val(meta), path("${name}_humann_temp/${name}_diamond_unaligned.fa"), emit: unmapped_reads, optional: true
 
   when:
   !params.skipHumann
@@ -99,26 +103,15 @@ process profile_function {
     --output . \\
     ${params.humann_params} \\
     --output-basename ${name} \\
-    --nucleotide-database ${params.chocophlan} \\
+    --nucleotide-database ${params.humann_chocophlan} \\
     --remove-column-description-output \\
-    --protein-database ${params.uniref} \\
-    --utility-database ${params.utility_mapping} \\
+    --protein-database ${params.humann_uniref} \\
+    --utility-database ${params.humann_utilitymap} \\
     --metaphlan-options "-t rel_ab_w_read_stats --index ${params.humann_metaphlan_index} --bowtie2db ${params.humann_metaphlan_db} --bt2_ps ${params.bt2options}" \\
     --pathways metacyc \\
-    --threads ${task.cpus} \\
+    --threads ${task.cpus * 2} \\
     --memory-use minimum \\
     ${params.enable_medi ? '' : '--remove-temp-output'}
-
-  # Copy diamond_unaligned reads out of HUMAnN temp dir for MEDI.
-  # diamond_unaligned.fa = reads that missed ChocoPhlAn (nucleotide) AND uniref90 (protein).
-  # Validated on SRP662258: identical food detections to bowtie2_unaligned, 6-16% fewer
-  # reads — preferred for production (see issue I13). Uncompressed: Kraken2 reads .fa natively.
-  if [ -f ${name}_humann_temp/${name}_diamond_unaligned.fa ]; then
-    if [ ! -s ${name}_humann_temp/${name}_diamond_unaligned.fa ]; then
-      echo "WARNING: diamond_unaligned.fa is empty for ${name} — no reads survived Diamond filter. MEDI will receive no input." >&2
-    fi
-    cp ${name}_humann_temp/${name}_diamond_unaligned.fa ${name}_unaligned.fa
-  fi
 
   # MultiQC doesn't have a module for humann yet. As a consequence, I
   # had to create a YAML file with all the info I need via a bash script

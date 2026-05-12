@@ -651,11 +651,11 @@ aws cloudformation wait stack-delete-complete \
 All databases must be synced to `/mnt/dbs/` on each worker before the run starts. The Launch Template's UserData handles this via `aws s3 sync` during EC2 initialization. Database paths are fixed in `conf/aws_batch.config`:
 
 ```
-direct_metaphlan_db        = /mnt/dbs/metaphlan_databases/vJan25/
+direct_metaphlan_db               = /mnt/dbs/metaphlan_databases/vJan25/
 humann_metaphlan_db        = /mnt/dbs/metaphlan_databases/vOct22/
-humann_chocophlan          = /mnt/dbs/chocophlan_v4_alpha/
-humann_uniref              = /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/
-humann_utilitymap          = /mnt/dbs/full_mapping_v4_alpha/
+humann_chocophlan                 = /mnt/dbs/chocophlan_v4_alpha/
+humann_uniref                     = /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/
+humann_utilitymap            = /mnt/dbs/full_mapping_v4_alpha/
 ```
 
 ---

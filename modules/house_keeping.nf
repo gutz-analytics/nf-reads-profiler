@@ -128,13 +128,13 @@ process MULTIQC {
   path(multiqc_config)
   output:
   path "multiqc_report.html"
-  path "multiqc_data"
+  path "multiqc_report_data"
 
   
   script:
   run = task.ext.run ?: "${meta.run}"
   """
-  multiqc --config $multiqc_config . -f
+  multiqc --config $multiqc_config . -f -n multiqc_report.html
   """
 }
 

@@ -90,7 +90,7 @@ All profiles expect pre-staged databases; nothing is downloaded at runtime.
 | Param | Purpose |
 |-------|---------|
 | `direct_metaphlan_id` / `direct_metaphlan_db` | Standalone MetaPhlAn (newer DB, e.g. `mpa_vJan25_CHOCOPhlAnSGB_202503`) |
-| `humann_metaphlan_id` / `humann_metaphlan_db` | MetaPhlAn DB matched to HUMAnN4 (e.g. `mpa_vOct22_CHOCOPhlAnSGB_202403`) |
+| `humann_metaphlan_index` / `humann_metaphlan_db` | MetaPhlAn DB matched to HUMAnN4 (e.g. `mpa_vOct22_CHOCOPhlAnSGB_202403`) |
 | `humann_chocophlan` / `humann_uniref` / `humann_utilitymap` | HUMAnN4 nucleotide/protein/mapping DBs |
 | `medi_db_path` / `medi_food_matches` / `medi_food_contents` | MEDI Kraken2+Bracken DB and food metadata |
 
@@ -131,8 +131,8 @@ Defined in `nextflow.config`:
 
 - `skipHumann` (default false) — skip functional profiling and all HUMAnN combine/split steps.
 - `singleEnd`, `mergeReads`, `nreads` (32,000,000 cap), `minreads` (100,000 floor; samples below this are logged and dropped, not failed).
-- `humann_regroup`, `humann_regroups` (e.g. `"uniref90_ko,uniref90_rxn"`), `humann_split_size` — used by the currently-disabled regroup branch.
-- `humann_extraparams` — passthrough (test profile sets `--bypass-translated-search`).
+- `process_humann_tables`, `humann_regroups` (e.g. `"uniref90_ko,uniref90_rxn"`), `split_size` — used by the currently-disabled regroup branch.
+- `humann_params` — passthrough (test profile sets `--bypass-translated-search`).
 - MEDI: `enable_medi`, `confidence`, `consistency`, `entropy`, `multiplicity`, `read_length`, `threshold`, `batchsize`, `mapping`, plus fastp knobs (`trim_front`, `min_length`, `quality_threshold`).
 
 Error strategy is profile-dependent. Azure uses `errorStrategy = 'ignore'`
