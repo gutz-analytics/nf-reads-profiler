@@ -171,12 +171,14 @@ workflow {
   profile_taxa(merged_reads)
 
 
-  ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
-  
+  // Skip samples whose HUMAnN outputs already exist (production resume optimisation)
+  ch_filtered_reads = params.skipCompleted
+    ? merged_reads.filter { meta, reads -> !output_exists(meta) }
+    : merged_reads
 
   // Functional profiling (HUMAnN4) if not skipped
   if ( ! params.skipHumann ) {
-    profile_function(merged_reads)
+    profile_function(ch_filtered_reads)
 
     ch_genefamilies = profile_function.out.profile_function_gf
                 .map { meta, table ->
