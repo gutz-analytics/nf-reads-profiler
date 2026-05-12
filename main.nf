@@ -75,11 +75,11 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 
 
 def output_exists(meta) {
-  run = meta.run
-  name = meta.id
-  pathcoverage_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
-  genefamilies_file = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
-  pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
+  def run = meta.run
+  def name = meta.id
+  def pathcoverage_file  = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
+  def genefamilies_file  = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
+  def pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
   return pathcoverage_file.exists() && genefamilies_file.exists() && pathabundance_file.exists()
 }
 
@@ -141,7 +141,7 @@ workflow {
     .set { sra_reads }
 
   // Merge all read channels
-  reads_ch = Channel.empty()
+  reads_ch = channel.empty()
       .mix(local_reads)
       .mix(sra_reads)
 
@@ -150,20 +150,21 @@ workflow {
     
     // Split into passing and failing samples based on read count
     count_reads.out.read_info
+        .map { meta, reads, count_file -> [meta, reads, count_file.text.trim().toInteger()] }
         .branch {
-            pass: it[2].toInteger() >= params.minreads
+            pass: { _meta, _reads, count -> count >= params.minreads }
             fail: true
         }
         .set { read_check }
-    
+
     // Log filtered samples
     read_check.fail
-        .map { meta, reads, count -> 
+        .map { meta, reads, count ->
             log.info "Skipping sample ${meta.id} due to insufficient reads: ${count} < ${params.minreads}"
         }
 
     // Process passing samples
-    clean_reads(read_check.pass.map { meta, reads, count -> [meta, reads] })
+    clean_reads(read_check.pass.map { meta, reads, _count -> [meta, reads] })
 
   merged_reads = clean_reads.out.reads_cleaned
 
@@ -173,7 +174,7 @@ workflow {
 
   // Skip samples whose HUMAnN outputs already exist (production resume optimisation)
   ch_filtered_reads = params.skipCompleted
-    ? merged_reads.filter { meta, reads -> !output_exists(meta) }
+    ? merged_reads.filter { meta, _reads -> !output_exists(meta) }
     : merged_reads
 
   // Functional profiling (HUMAnN4) if not skipped
@@ -293,8 +294,8 @@ workflow {
     // Process HUMAnN tables if enabled
     if (params.process_humann_tables) {
       // Use only the genefamilies combined tables for processing
-      ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, table -> 
-        meta.type == 'genefamilies' 
+      ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, _table ->
+        meta.type == 'genefamilies'
       }
       regroup_genefamilies(ch_combined_genefamilies)
     }
@@ -302,7 +303,7 @@ workflow {
   }
 
   // MultiQC setup
-  ch_multiqc_files = Channel.empty()
+  ch_multiqc_files = channel.empty()
   ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log.ifEmpty([]))
   // ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
   if ( ! params.skipHumann ) {
@@ -310,7 +311,7 @@ workflow {
   }
   
 
-  ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
+  ch_multiqc_config = channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
 
   ch_multiqc_runs = ch_multiqc_files.map {
               meta, table ->
