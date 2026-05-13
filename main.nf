@@ -151,16 +151,15 @@ workflow {
     
     // Split into passing and failing samples based on read count
     count_reads.out.read_info
-        .map { meta, reads, count_file -> [meta, reads, count_file.text.trim().toInteger()] }
-        .branch {
-            pass: { _meta, _reads, count -> count >= params.minreads }
+        .branch { row ->
+            pass: row[2].toInteger() >= params.minreads
             fail: true
         }
         .set { read_check }
 
     // Log filtered samples
     read_check.fail
-        .map { meta, reads, count ->
+        .map { meta, _reads, count ->
             log.info "Skipping sample ${meta.id} due to insufficient reads: ${count} < ${params.minreads}"
         }
 
