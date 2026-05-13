@@ -188,7 +188,7 @@ workflow {
                     meta_new.put('type','genefamilies')
                     [ meta_new, table ]
                 }
-                .groupTuple()
+                .groupTuple(sort: true)
 
     ch_reactions = profile_function.out.profile_function_reactions
                 .map { meta, table ->
@@ -196,7 +196,7 @@ workflow {
                     meta_new.put('type','reactions')
                     [ meta_new, table ]
                 }
-                .groupTuple()
+                .groupTuple(sort: true)
 
     ch_pathabundance = profile_function.out.profile_function_pa
                 .map { meta, table ->
@@ -204,7 +204,7 @@ workflow {
                     meta_new.put('type','pathabundance')
                     [ meta_new, table ]
                 }
-                .groupTuple()
+                .groupTuple(sort: true)
 
     // HUMAnN-generated taxonomy profiles (separate from independent MetaPhlAn)
     ch_humann_taxonomy = profile_function.out.profile_function_metaphlan
@@ -213,7 +213,7 @@ workflow {
                     meta_new.put('type','metaphlan_profile')
                     [ meta_new, table ]
                 }
-                .groupTuple()
+                .groupTuple(sort: true)
 
     combine_humann_tables(ch_genefamilies.mix(ch_reactions, ch_pathabundance))
     
@@ -241,8 +241,8 @@ workflow {
                   def meta_new = meta - meta.subMap('id')
               [ meta_new, table ]
             }
-            .groupTuple()
-            
+            .groupTuple(sort: true)
+
   combine_metaphlan_tables(ch_metaphlan)
 
   // MEDI quantification workflow — I13 shortcut: diamond_unaligned → Kraken2 directly.
@@ -258,7 +258,7 @@ workflow {
     // Group HUMAnN unaligned reads by study for MEDI
     profile_function.out.unmapped_reads
       .map { meta, reads -> [meta.run, meta, reads] }
-      .groupTuple(by: [0])
+      .groupTuple(by: [0], sort: true)
       .map { study, metas, reads_files ->
         def samples = [metas, reads_files].transpose().collect { m, r -> [m, r] }
         [study, samples]
@@ -319,7 +319,7 @@ workflow {
                   def meta_new = meta - meta.subMap('id')
               [ meta_new, table ]
             }
-            .groupTuple()
+            .groupTuple(sort: true)
   get_software_versions()
   MULTIQC (
     get_software_versions.out.software_versions_yaml,

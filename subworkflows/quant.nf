@@ -95,7 +95,7 @@ process kraken {
     label 'kraken'
     scratch false
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/kraken2"}
+    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/kraken2"}, mode: 'copy'
     cpus 8
 
     input:
@@ -122,7 +122,7 @@ process architeuthis_filter {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/kraken2"}, overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/kraken2"}, mode: 'copy', overwrite: true
 
     input:
     tuple val(meta), path(k2)
@@ -145,7 +145,7 @@ process kraken_report {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/kraken2"}, overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/kraken2"}, mode: 'copy', overwrite: true
 
     input:
     tuple val(meta), path(k2)
@@ -164,7 +164,7 @@ process summarize_mappings {
     tag "$name"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/architeuthis"}
+    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/architeuthis"}, mode: 'copy'
 
     input:
     tuple val(meta), path(k2)
@@ -201,7 +201,7 @@ process count_taxa {
     tag "${name}_${lev}"
     label 'low'
     container params.docker_container_medi
-    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/bracken"}, overwrite: true
+    publishDir {"${params.outdir}/${params.project}/${meta.run}/medi/bracken"}, mode: 'copy', overwrite: true
 
     input:
     tuple val(meta), path(report), val(lev)
