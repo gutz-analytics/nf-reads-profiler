@@ -42,22 +42,20 @@ process count_reads {
   
   container params.docker_container_fastp
   
-  publishDir "${params.outdir}/${params.project}/${run}/readcount", mode: 'copy', pattern: "*_readcount.txt"
+  publishDir {"${params.outdir}/${params.project}/${run}/readcount"}, mode: 'copy', pattern: "*_readcount.txt"
 
   input:
   tuple val(meta), path(reads)
 
   output:
-  tuple val(meta), path(reads), env(READ_COUNT), emit: read_info
-  tuple val(meta), path("${name}_readcount.txt"), emit: read_count
-  
+  tuple val(meta), path(reads), path("${name}_readcount.txt"), emit: read_info
+
   script:
   name = task.ext.name ?: "${meta.id}"
   run = task.ext.run ?: "${meta.run}"
   """
   # Count sequences in first read file (divide line count by 4 since FASTQ has 4 lines per read)
-  READ_COUNT=\$(zcat ${reads[0]} | echo \$((`wc -l`/4)))
-  echo \$READ_COUNT > ${name}_readcount.txt
+  zcat ${reads[0]} | echo \$((`wc -l`/4)) > ${name}_readcount.txt
   """
 }
 
@@ -120,7 +118,7 @@ process clean_reads {
 
 process MULTIQC {
   tag "$run"
-  publishDir "${params.outdir}/${params.project}/${run}/log", mode: 'copy'
+  publishDir {"${params.outdir}/${params.project}/${run}/log"}, mode: 'copy'
 
   container params.docker_container_multiqc
 
@@ -130,13 +128,13 @@ process MULTIQC {
   path(multiqc_config)
   output:
   path "multiqc_report.html"
-  path "multiqc_data"
+  path "multiqc_report_data"
 
   
   script:
   run = task.ext.run ?: "${meta.run}"
   """
-  multiqc --config $multiqc_config . -f
+  multiqc --config $multiqc_config . -f -n multiqc_report.html
   """
 }
 

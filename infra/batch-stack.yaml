@@ -1,0 +1,1022 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS Batch infrastructure for nf-reads-profiler Nextflow pipeline.
+  Creates IAM roles, Graviton (ARM64) compute environments, job queue,
+  S3 buckets, CloudWatch monitoring, and AWS Budget alerts.
+
+  Bucket ownership:
+    WorkDirBucketName  — Nextflow intermediate files; managed by this stack,
+                         deleted on teardown (after manual emptying).
+    RunsBucketName     — Pre-existing bucket for samplesheets and results;
+                         referenced in IAM policies only, NOT created by this stack.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC for Batch compute environments (use default VPC or custom)
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >
+      Subnets for Batch compute instances. Use public subnets with auto-assign
+      public IP, or private subnets with NAT gateway (required for DockerHub pulls).
+
+  WorkDirBucketName:
+    Type: String
+    Default: gutz-nf-reads-profilers-workdir
+    Description: >
+      S3 bucket for Nextflow intermediate work files. Managed by this stack —
+      deleted when the stack is deleted (after you empty it first).
+      A 30-day lifecycle rule is applied automatically.
+      If this bucket already exists, import it: see readme for instructions.
+
+  RunsBucketName:
+    Type: String
+    Default: gutz-nf-reads-profilers-runs
+    Description: >
+      Pre-existing S3 bucket for samplesheets (input) and pipeline results (output).
+      This bucket is NOT created or deleted by this stack — it is only referenced
+      in IAM policies so Batch jobs can read/write to it.
+
+  SpotBidPercentage:
+    Type: Number
+    Default: 70
+    MinValue: 1
+    MaxValue: 100
+    Description: >
+      Spot bid as % of on-demand price. Graviton spot prices in us-east-2 rarely
+      exceed 35% of on-demand, so 70% provides a comfortable margin.
+
+  MaxvCPUsSpot:
+    Type: Number
+    Default: 32
+    Description: Maximum vCPUs across all spot instances (controls pipeline parallelism)
+
+  MaxvCPUsOnDemand:
+    Type: Number
+    Default: 0
+    Description: Maximum vCPUs for on-demand fallback (cost safety net)
+
+  MonthlyBudgetThreshold:
+    Type: Number
+    Default: 200
+    Description: Monthly AWS spend alert threshold in USD (alerts fire at 80% actual and 100% forecasted)
+
+  BudgetAlertEmail:
+    Type: String
+    Description: Email address for budget and CloudWatch alarm notifications
+
+  ProjectTag:
+    Type: String
+    Default: nf-reads-profiler
+    Description: Value for Project cost-allocation tag applied to all resources
+
+  EnvironmentTag:
+    Type: String
+    Default: development
+    AllowedValues: [production, staging, development]
+    Description: Value for Environment tag applied to all resources
+
+  EcsAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: >
+      Custom pre-baked AMI for Batch workers. Built by infra/packer/build-ami.sh
+      from the AL2023 ECS-optimized ARM64 base, with databases (~65 GiB) and
+      Miniconda/awscli pre-installed at /mnt/dbs/ and /opt/conda-aws/.
+      Look up the current AMI with:
+        aws ssm get-parameter --name /nf-reads-profiler/ami-id --region us-east-2 --query 'Parameter.Value' --output text
+
+  DbSourceBucket:
+    Type: String
+    Default: cjb-gutz-s3-demo
+    Description: >
+      S3 bucket that holds the metaomics databases (MetaPhlAn, HUMAnN4,
+      ChocoPhlAn, UniRef). Databases are pre-baked into the custom AMI;
+      this parameter is used only for IAM policy permissions.
+      The EcsInstanceRole is granted read-only access to this bucket.
+      This bucket is NOT created or deleted by this stack.
+
+# ---------------------------------------------------------------------------
+# S3
+# ---------------------------------------------------------------------------
+Resources:
+
+  # Work directory: Nextflow intermediate task files.
+  # Managed by this stack — deleted when the stack is torn down.
+  # Lifecycle rule auto-expires objects after 30 days, keeping costs low
+  # and ensuring the bucket is nearly empty by teardown time.
+  S3WorkDirBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref WorkDirBucketName
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-work-files-30-days
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 7
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 3
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  # Runs bucket (gutz-nf-reads-profilers-runs) is pre-existing and externally managed.
+  # It is NOT created by this stack. IAM policies below reference it by name.
+
+# ---------------------------------------------------------------------------
+# IAM
+# ---------------------------------------------------------------------------
+
+  # Batch service role — allows AWS Batch to call EC2/ECS on your behalf
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectTag}-batch-service-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: batch.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  # EC2 instance role — assumed by the ECS agent on each Batch compute instance
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectTag}-ecs-instance-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !GetAtt S3WorkDirBucket.Arn
+                  - !Sub "${S3WorkDirBucket.Arn}/*"
+                  - !Sub "arn:aws:s3:::${RunsBucketName}"
+                  - !Sub "arn:aws:s3:::${RunsBucketName}/*"
+                  # Database bucket
+                  - !Sub "arn:aws:s3:::${DbSourceBucket}"
+                  - !Sub "arn:aws:s3:::${DbSourceBucket}/*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  EcsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "${ProjectTag}-ecs-instance-profile"
+      Roles:
+        - !Ref EcsInstanceRole
+
+  # Job role — assumed by containers themselves (ECS task role).
+  # Nextflow passes this as jobRoleArn when registering job definitions.
+  BatchJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectTag}-batch-job-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !GetAtt S3WorkDirBucket.Arn
+                  - !Sub "${S3WorkDirBucket.Arn}/*"
+                  - !Sub "arn:aws:s3:::${RunsBucketName}"
+                  - !Sub "arn:aws:s3:::${RunsBucketName}/*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/batch/*"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  # Spot fleet role — required for SPOT allocation strategy
+  SpotFleetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectTag}-spot-fleet-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: spotfleet.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  # Managed policy to attach to the EC2 Nextflow runner's existing IAM role.
+  # After deploying: aws iam attach-role-policy --policy-arn <NextflowRunnerPolicyArn output>
+  NextflowRunnerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${ProjectTag}-nextflow-runner-policy"
+      Description: "Grants an EC2 Nextflow runner VM the minimum permissions to submit and monitor AWS Batch jobs and read/write both S3 buckets."
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: BatchSubmitAndMonitor
+            Effect: Allow
+            Action:
+              - batch:SubmitJob
+              - batch:DescribeJobs
+              - batch:CancelJob
+              - batch:TerminateJob
+              - batch:ListJobs
+              - batch:RegisterJobDefinition
+              - batch:DeregisterJobDefinition
+              - batch:DescribeJobDefinitions
+              - batch:DescribeJobQueues
+              - batch:DescribeComputeEnvironments
+            Resource: '*'
+          - Sid: S3Access
+            Effect: Allow
+            Action: s3:*
+            Resource:
+              - !GetAtt S3WorkDirBucket.Arn
+              - !Sub "${S3WorkDirBucket.Arn}/*"
+              - !Sub "arn:aws:s3:::${RunsBucketName}"
+              - !Sub "arn:aws:s3:::${RunsBucketName}/*"
+          - Sid: CloudWatchLogs
+            Effect: Allow
+            Action:
+              - logs:GetLogEvents
+              - logs:DescribeLogStreams
+              - logs:DescribeLogGroups
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/batch/*"
+          - Sid: PassJobRole
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt BatchJobRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: ecs-tasks.amazonaws.com
+          - Sid: PassLambdaRole
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt BatchMetricsLambdaRole.Arn
+            Condition:
+              StringEquals:
+                iam:PassedToService: lambda.amazonaws.com
+          - Sid: LambdaDeploy
+            Effect: Allow
+            Action:
+              - lambda:CreateFunction
+              - lambda:GetFunction
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
+              - lambda:DeleteFunction
+              - lambda:AddPermission
+              - lambda:RemovePermission
+              - lambda:GetPolicy
+              - lambda:ListTags
+              - lambda:TagResource
+              - lambda:UntagResource
+            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProjectTag}-*"
+          - Sid: EventBridgeDeploy
+            Effect: Allow
+            Action:
+              - events:PutRule
+              - events:DescribeRule
+              - events:DeleteRule
+              - events:PutTargets
+              - events:RemoveTargets
+              - events:ListTargetsByRule
+            Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/${ProjectTag}-*"
+
+# ---------------------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------------------
+
+  BatchComputeSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${ProjectTag}-batch-compute-sg"
+      GroupDescription: "Security group for AWS Batch compute instances - no inbound required, instances pull containers and data from S3 outbound."
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: All outbound (DockerHub pulls, S3, AWS APIs)
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectTag}-batch-compute-sg"
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+# ---------------------------------------------------------------------------
+# Launch Template — pre-baked custom AMI with databases + Miniconda/awscli
+# ---------------------------------------------------------------------------
+# The AMI is built by infra/packer/build-ami.sh and contains:
+#   /opt/conda-aws/bin/aws  — Miniconda + awscli (Nextflow's cliPath)
+#   /mnt/dbs/               — all four reference databases (~65 GiB)
+#
+# Nextflow mounts the GRANDPARENT directory of aws.batch.cliPath from the host
+# into each Batch container at the same path. For cliPath '/opt/conda-aws/bin/aws'
+# that means /opt/conda-aws/ is bind-mounted in.
+#
+# UserData is a minimal health check — no S3 sync or software installation.
+# Workers register with ECS immediately at boot.
+
+  BatchWorkerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${ProjectTag}-worker"
+      LaunchTemplateData:
+        ImageId: !Ref EcsAmiId
+        # 500 GB gp3 root volume. AL2023 ECS-optimized defaults to 30 GB, which
+        # is exhausted by fasterq-dump scratch + pigz output on medium SRA runs.
+        # Volume is deleted on instance termination; cost is ~$0.055/hr while
+        # a worker is running, $0 once the fleet scales to zero.
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 500
+              VolumeType: gp3
+              DeleteOnTermination: true
+              Encrypted: true
+        UserData:
+          Fn::Base64: !Sub |
+            MIME-Version: 1.0
+            Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+
+            --==BOUNDARY==
+            Content-Type: text/x-shellscript; charset="us-ascii"
+
+            #!/bin/bash
+            exec > >(tee -a /var/log/nf-userdata.log) 2>&1
+            set -x
+            echo "=== nf-reads-profiler worker boot at $(date) ==="
+
+            ERRORS=0
+            for d in chocophlan_v4_alpha full_mapping_v4_alpha metaphlan_databases uniref90_annotated_v4_alpha_ec_filtered; do
+              if [ ! -d "/mnt/dbs/$d" ]; then
+                echo "ERROR: /mnt/dbs/$d missing — wrong AMI?" >&2
+                ERRORS=$((ERRORS + 1))
+              fi
+            done
+
+            if [ ! -f /opt/conda-aws/bin/aws ]; then
+              echo "ERROR: /opt/conda-aws/bin/aws missing — wrong AMI?" >&2
+              ERRORS=$((ERRORS + 1))
+            fi
+
+            if [ $ERRORS -gt 0 ]; then
+              echo "FATAL: $ERRORS pre-bake checks failed. Rebuild AMI with infra/packer/build-ami.sh" >&2
+            else
+              echo "OK: all databases and awscli present"
+              cat /mnt/dbs/.ami-build-timestamp 2>/dev/null || true
+
+              # Phase 1 (issue I20): pre-warm MetaPhlAn vJan25 page cache.
+              # Run in the BACKGROUND so cloud-init returns immediately and
+              # the ECS agent can register with Batch. Without `&`, the cat
+              # blocks UserData for the duration of the snapshot lazy-load
+              # (~95 min observed at 6 MB/s without FSR, see issue I24),
+              # and the worker accepts no jobs the entire time. With `&`,
+              # ingest jobs (FASTERQ_DUMP, etc.) start immediately; only
+              # profile_taxa pays any remaining unwarmed cost on first task.
+              echo "=== Starting MetaPhlAn vJan25 page-cache warmup (background) ==="
+              nohup bash -c 'time cat /mnt/dbs/metaphlan_databases/vJan25/*.bt2l > /dev/null 2>&1' \
+                >> /var/log/nf-userdata.log 2>&1 &
+              echo "Warmup PID: $!"
+            fi
+
+            echo "=== nf-reads-profiler worker boot done at $(date) ==="
+
+            --==BOUNDARY==--
+
+# ---------------------------------------------------------------------------
+# Compute Environments — Graviton (ARM64) only
+# ---------------------------------------------------------------------------
+# All containers in this pipeline publish multi-arch images (linux/arm64 + amd64).
+# Graviton instances provide 20-40% better price/performance than x86 equivalents.
+# AWS Batch automatically selects the ARM64 ECS-optimized AMI when ARM instance
+# types are specified.
+#
+# Resource fits against aws_batch.config limits (cpus: 8, memory: 64 GB):
+#   r8g.2xlarge  = 8 vCPU / 64 GB  ← HUMAnN (memory-bound), exact fit
+#   r8g.4xlarge  = 16 vCPU / 128 GB ← two HUMAnN jobs in parallel
+#   m8g.2xlarge  = 8 vCPU / 32 GB  ← MetaPhlAn, fastp, SRA download
+#   c8g.2xlarge  = 8 vCPU / 16 GB  ← MetaPhlAn (CPU-bound alignment)
+
+  # Primary: spot instances. SPOT_CAPACITY_OPTIMIZED selects the pool with the
+  # deepest available capacity, minimizing interruptions for long HUMAnN jobs.
+  # Graviton 4 only — G2/G3 dropped for per-task cost (see I25).
+  SpotComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      Type: MANAGED
+      State: ENABLED
+      ComputeResources:
+        Type: SPOT
+        AllocationStrategy: SPOT_CAPACITY_OPTIMIZED
+        BidPercentage: !Ref SpotBidPercentage
+        MinvCpus: 0
+        MaxvCpus: !Ref MaxvCPUsSpot
+        InstanceRole: !GetAtt EcsInstanceProfile.Arn
+        SpotIamFleetRole: !GetAtt SpotFleetRole.Arn
+        InstanceTypes:
+          # Graviton 4 (r8g) — memory-optimized, best price/perf for HUMAnN
+          - r8g.2xlarge    # 8 vCPU / 64 GB
+          - r8g.4xlarge    # 16 vCPU / 128 GB
+          # Graviton 4 (m8g) — general purpose for MetaPhlAn, fastp, downloads
+          - m8g.2xlarge    # 8 vCPU / 32 GB
+          - m8g.4xlarge    # 16 vCPU / 64 GB
+          # Graviton 4 (c8g) — compute-optimized for CPU-bound alignment
+          - c8g.2xlarge    # 8 vCPU / 16 GB
+          - c8g.4xlarge    # 16 vCPU / 32 GB
+        LaunchTemplate:
+          LaunchTemplateId: !Ref BatchWorkerLaunchTemplate
+          Version: $Latest
+        Subnets: !Ref SubnetIds
+        SecurityGroupIds:
+          - !Ref BatchComputeSG
+        Tags:
+          Project: !Ref ProjectTag
+          Environment: !Ref EnvironmentTag
+      Tags:
+        Project: !Ref ProjectTag
+        Environment: !Ref EnvironmentTag
+
+  # Fallback: on-demand Graviton instances — used when spot capacity unavailable.
+  # Capped at MaxvCPUsOnDemand (default 64) as a cost safety net.
+  OnDemandComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      Type: MANAGED
+      State: ENABLED
+      ComputeResources:
+        Type: EC2
+        AllocationStrategy: BEST_FIT_PROGRESSIVE
+        MinvCpus: 0
+        MaxvCpus: !Ref MaxvCPUsOnDemand
+        InstanceRole: !GetAtt EcsInstanceProfile.Arn
+        InstanceTypes:
+          - r8g.2xlarge
+          - r8g.4xlarge
+          - m8g.2xlarge
+          - m8g.4xlarge
+          - c8g.2xlarge
+          - c8g.4xlarge
+        LaunchTemplate:
+          LaunchTemplateId: !Ref BatchWorkerLaunchTemplate
+          Version: $Latest
+        Subnets: !Ref SubnetIds
+        SecurityGroupIds:
+          - !Ref BatchComputeSG
+        Tags:
+          Project: !Ref ProjectTag
+          Environment: !Ref EnvironmentTag
+      Tags:
+        Project: !Ref ProjectTag
+        Environment: !Ref EnvironmentTag
+
+# ---------------------------------------------------------------------------
+# Job Queue
+# ---------------------------------------------------------------------------
+
+  # Named exactly "spot-queue" to match conf/aws_batch.config — no config changes needed.
+  # Spot CE has priority 1 (tried first); on-demand CE has priority 2 (transparent fallback).
+  SpotQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: spot-queue
+      State: ENABLED
+      Priority: 100
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref SpotComputeEnvironment
+        - Order: 2
+          ComputeEnvironment: !Ref OnDemandComputeEnvironment
+      Tags:
+        Project: !Ref ProjectTag
+        Environment: !Ref EnvironmentTag
+
+# ---------------------------------------------------------------------------
+# CloudWatch Logs
+# ---------------------------------------------------------------------------
+
+  BatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/batch/nf-reads-profiler
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+# ---------------------------------------------------------------------------
+# SNS — alarm and budget notifications
+# ---------------------------------------------------------------------------
+
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectTag}-alerts"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref BudgetAlertEmail
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+# ---------------------------------------------------------------------------
+# CloudWatch Alarms
+# ---------------------------------------------------------------------------
+
+  # Fires when 5+ jobs fail within 5 minutes — indicates a systemic issue
+  # (bad container image, IAM permission error, etc.) vs. normal spot interruptions
+  # which are handled transparently by maxRetries=3 in aws_batch.config.
+  FailedJobsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectTag}-batch-failed-jobs"
+      AlarmDescription: "5+ Batch jobs failed in 5 minutes on spot-queue. Likely a systemic issue rather than spot interruptions (those are retried automatically)."
+      Namespace: AWS/Batch
+      MetricName: FailedJobCount
+      Dimensions:
+        - Name: JobQueue
+          Value: !GetAtt SpotQueue.JobQueueArn
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+    DependsOn: SpotQueue
+
+  # Fires when many jobs are stuck RUNNABLE — indicates spot capacity is
+  # exhausted AND the on-demand fallback CE is also full or hitting the
+  # MaxvCPUsOnDemand cap. Operator action: raise MaxvCPUsOnDemand or
+  # check spot interruption rate. Tracks the RunnableJobCount gauge
+  # emitted by BatchQueueDepthFunction (issue I17).
+  RunnableJobsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectTag}-batch-high-runnable"
+      AlarmDescription: "10+ jobs stuck RUNNABLE on spot-queue for 15+ minutes. Spot capacity exhausted and on-demand vCPU limit reached. Consider raising MaxvCPUsOnDemand."
+      Namespace: AWS/Batch
+      MetricName: RunnableJobCount
+      Dimensions:
+        - Name: JobQueue
+          Value: !GetAtt SpotQueue.JobQueueArn
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopic
+      OKActions:
+        - !Ref AlarmTopic
+    DependsOn: SpotQueue
+
+# ---------------------------------------------------------------------------
+# Batch Job Metrics — EventBridge → Lambda → CloudWatch
+# Publishes SucceededJobCount, FailedJobCount, etc. to AWS/Batch namespace.
+# AWS Batch does not emit these metrics automatically; this is the back-end
+# that feeds the dashboard below.
+# ---------------------------------------------------------------------------
+
+  BatchMetricsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectTag}-batch-metrics-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: PutBatchMetrics
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: AWS/Batch
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  BatchMetricsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: NextflowRunnerPolicy
+    Properties:
+      FunctionName: !Sub "${ProjectTag}-batch-metrics"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt BatchMetricsLambdaRole.Arn
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import boto3
+
+          cw = boto3.client('cloudwatch')
+
+          # Event-driven counters: emit value=1 per state-transition. Sum
+          # aggregation gives a "throughput in window" metric. Only kept
+          # for terminal states; queue-depth gauges (RUNNABLE, RUNNING,
+          # etc.) are emitted by the scheduled BatchQueueDepthFunction
+          # below as actual depths via list-jobs. See issue I17.
+          METRIC_MAP = {
+              'SUCCEEDED': 'SucceededJobCount',
+              'FAILED':    'FailedJobCount',
+          }
+
+          def handler(event, context):
+              detail = event.get('detail', {})
+              status = detail.get('status')
+              job_queue = detail.get('jobQueue')  # full ARN from Batch events
+              metric = METRIC_MAP.get(status)
+              if not metric or not job_queue:
+                  return
+              cw.put_metric_data(
+                  Namespace='AWS/Batch',
+                  MetricData=[{
+                      'MetricName': metric,
+                      'Dimensions': [{'Name': 'JobQueue', 'Value': job_queue}],
+                      'Value': 1,
+                      'Unit': 'Count',
+                  }]
+              )
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  BatchJobStateRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectTag}-batch-job-state-change"
+      Description: "Capture Batch job state changes and publish counts to CloudWatch AWS/Batch namespace"
+      EventPattern:
+        source:
+          - aws.batch
+        detail-type:
+          - Batch Job State Change
+      State: ENABLED
+      Targets:
+        - Id: BatchMetricsLambda
+          Arn: !GetAtt BatchMetricsFunction.Arn
+
+  BatchMetricsLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt BatchMetricsFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BatchJobStateRule.Arn
+
+# ---------------------------------------------------------------------------
+# Batch Queue Depth — scheduled poll → CloudWatch (issue I17)
+# Replaces the broken event-driven RunnableJobCount with an actual depth
+# gauge polled every 60s via list-jobs. The previous design emitted
+# value=1 per state-change event, which gave the alarm at most "1" to
+# look at; with this Lambda the alarm sees real queue depth.
+# ---------------------------------------------------------------------------
+
+  BatchQueueDepthLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectTag}-batch-queue-depth-lambda-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: PollAndPublish
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: batch:ListJobs
+                Resource: '*'
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: AWS/Batch
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  BatchQueueDepthFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectTag}-batch-queue-depth"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt BatchQueueDepthLambdaRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          QUEUE_NAME: !Ref SpotQueue
+          QUEUE_ARN:  !GetAtt SpotQueue.JobQueueArn
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+
+          batch = boto3.client('batch')
+          cw    = boto3.client('cloudwatch')
+
+          QUEUE_NAME = os.environ['QUEUE_NAME']
+          QUEUE_ARN  = os.environ['QUEUE_ARN']
+
+          # Live queue-depth gauges. Emitted as actual counts (not value=1)
+          # so Maximum/Average aggregation gives the real backlog.
+          STATUSES = {
+              'SUBMITTED': 'SubmittedJobCount',
+              'PENDING':   'PendingJobCount',
+              'RUNNABLE':  'RunnableJobCount',
+              'STARTING':  'StartingJobCount',
+              'RUNNING':   'RunningJobCount',
+          }
+
+          def count_jobs(status):
+              count, token = 0, None
+              while True:
+                  kwargs = {'jobQueue': QUEUE_NAME, 'jobStatus': status, 'maxResults': 100}
+                  if token:
+                      kwargs['nextToken'] = token
+                  resp = batch.list_jobs(**kwargs)
+                  count += len(resp['jobSummaryList'])
+                  token = resp.get('nextToken')
+                  if not token:
+                      break
+              return count
+
+          def handler(event, context):
+              metric_data = [
+                  {
+                      'MetricName': metric,
+                      'Dimensions': [{'Name': 'JobQueue', 'Value': QUEUE_ARN}],
+                      'Value': count_jobs(status),
+                      'Unit': 'Count',
+                  }
+                  for status, metric in STATUSES.items()
+              ]
+              cw.put_metric_data(Namespace='AWS/Batch', MetricData=metric_data)
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  BatchQueueDepthScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectTag}-batch-queue-depth-schedule"
+      Description: "Poll Batch queue depth every 60s and publish to CloudWatch."
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Id: BatchQueueDepthLambda
+          Arn: !GetAtt BatchQueueDepthFunction.Arn
+
+  BatchQueueDepthLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt BatchQueueDepthFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt BatchQueueDepthScheduleRule.Arn
+
+# ---------------------------------------------------------------------------
+# CloudWatch Dashboard
+# ---------------------------------------------------------------------------
+
+  BatchDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${ProjectTag}-batch"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Job Status — spot-queue",
+                "metrics": [
+                  ["AWS/Batch", "SucceededJobCount", "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#2ca02c", "label": "Succeeded"}],
+                  ["AWS/Batch", "FailedJobCount",    "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#d62728", "label": "Failed"}],
+                  ["AWS/Batch", "PendingJobCount",   "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#ff7f0e", "label": "Pending"}],
+                  ["AWS/Batch", "RunnableJobCount",  "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#1f77b4", "label": "Runnable"}],
+                  ["AWS/Batch", "StartingJobCount",  "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#9467bd", "label": "Starting"}],
+                  ["AWS/Batch", "RunningJobCount",   "JobQueue", "${SpotQueue.JobQueueArn}", {"color": "#17becf", "label": "Running"}]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "view": "timeSeries",
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "alarm",
+              "x": 0, "y": 6, "width": 6, "height": 3,
+              "properties": {
+                "title": "Active Alarms",
+                "alarms": [
+                  "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${ProjectTag}-batch-failed-jobs",
+                  "arn:aws:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${ProjectTag}-batch-high-runnable"
+                ]
+              }
+            },
+            {
+              "type": "metric",
+              "x": 6, "y": 6, "width": 18, "height": 6,
+              "properties": {
+                "title": "Job Failure Rate (Failed / Submitted)",
+                "metrics": [
+                  ["AWS/Batch", "FailedJobCount",    "JobQueue", "${SpotQueue.JobQueueArn}"],
+                  ["AWS/Batch", "SucceededJobCount", "JobQueue", "${SpotQueue.JobQueueArn}"]
+                ],
+                "period": 3600,
+                "stat": "Sum",
+                "view": "timeSeries",
+                "region": "${AWS::Region}"
+              }
+            }
+          ]
+        }
+    DependsOn:
+      - FailedJobsAlarm
+      - RunnableJobsAlarm
+
+# ---------------------------------------------------------------------------
+# AWS Budget
+# ---------------------------------------------------------------------------
+
+  BatchMonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "${ProjectTag}-monthly"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetThreshold
+          Unit: USD
+        CostFilters:
+          TagKeyValue:
+            - !Sub "user:Project$${ProjectTag}"
+        CostTypes:
+          IncludeTax: true
+          IncludeSubscription: true
+          UseBlended: false
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetAlertEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref BudgetAlertEmail
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+
+Outputs:
+  SpotQueueArn:
+    Description: ARN of the spot-queue job queue (referenced by Nextflow aws_batch.config)
+    Value: !GetAtt SpotQueue.JobQueueArn
+    Export:
+      Name: !Sub "${AWS::StackName}-SpotQueueArn"
+
+  BatchJobRoleArn:
+    Description: >
+      ARN of the ECS task role for Batch jobs. Add to conf/aws_batch.config:
+      aws { batch { jobRole = '<this value>' } }
+    Value: !GetAtt BatchJobRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BatchJobRoleArn"
+
+  NextflowRunnerPolicyArn:
+    Description: >
+      Attach this managed policy to the IAM role of your EC2 Nextflow runner VM.
+      Command: aws iam attach-role-policy --role-name <runner-role> --policy-arn <this-value>
+    Value: !Ref NextflowRunnerPolicy
+    Export:
+      Name: !Sub "${AWS::StackName}-NextflowRunnerPolicyArn"
+
+  WorkDirBucket:
+    Description: S3 bucket for Nextflow work directory (set as workDir in aws_batch.config)
+    Value: !Ref S3WorkDirBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-WorkDirBucket"
+
+  DashboardUrl:
+    Description: CloudWatch dashboard for monitoring Batch jobs and vCPU utilization
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ProjectTag}-batch"
+
+  BatchConsoleUrl:
+    Description: AWS Batch console — view job queues, compute environments, and running jobs
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/batch/home?region=${AWS::Region}#/queues"
+
+  LogGroupName:
+    Description: CloudWatch log group for all Batch job logs
+    Value: /aws/batch/nf-reads-profiler

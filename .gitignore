@@ -6,3 +6,4 @@ test/
 .nf-test*
 ramdisk_test/keys.sh
 ramdisk_test/
+results_*

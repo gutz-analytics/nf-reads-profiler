@@ -34,111 +34,19 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
 
   Other options:
   MetaPhlAn parameters for taxa profiling:
-    --metaphlan_db path   folder for the MetaPhlAn database
+    --direct_metaphlan_db path   folder for the MetaPhlAn database
     --bt2options          value   BowTie2 options
 
   HUMANn parameters for functional profiling:
     --taxonomic_profile   path    s3path to precalculate metaphlan3 taxonomic profile output.
-    --chocophlan          path    folder for the ChocoPhlAn database
-    --uniref              path    folder for the UniRef database
-    --annotation  <true|false>   whether annotation is enabled (default: false)
+    --humann_chocophlan          path    folder for the ChocoPhlAn database
+    --humann_uniref              path    folder for the UniRef database
+
 
 nf-reads-profiler supports FASTQ and compressed FASTQ files.
 """
 }
 
-/**
-Prints version when asked for
-*/
-if (params.version) {
-  versionMessage()
-  exit 0
-}
-
-/**
-Prints help when asked for
-*/
-
-if (params.help) {
-  helpMessage()
-  exit 0
-}
-
-// Ensure skipHumann is a boolean
-params.skipHumann = params.skipHumann ? params.skipHumann.toString().toBoolean() : false
-
-//Creates working dir
-workingpath = params.outdir + "/" + params.project
-workingdir = file(workingpath)
-if( !workingdir.exists() ) {
-  if( !workingdir.mkdirs() )  {
-    exit 1, "Cannot create working directory: $workingpath"
-  }
-}
-
-
-// Header log info
-log.info """---------------------------------------------
-nf-reads-profiler
----------------------------------------------
-
-Analysis introspection:
-
-"""
-
-def summary = [:]
-
-summary['Starting time'] = new java.util.Date()
-//Environment
-summary['Environment'] = ""
-summary['Pipeline Name'] = 'nf-reads-profiler'
-summary['Pipeline Version'] = workflow.manifest.version
-
-summary['Config Profile'] = workflow.profile
-summary['Resumed'] = workflow.resume
-
-summary['Nextflow version'] = nextflow.version.toString() + " build " + nextflow.build.toString() + " (" + nextflow.timestamp + ")"
-
-summary['Java version'] = System.getProperty("java.version")
-summary['Java Virtual Machine'] = System.getProperty("java.vm.name") + "(" + System.getProperty("java.vm.version") + ")"
-
-summary['Operating system'] = System.getProperty("os.name") + " " + System.getProperty("os.arch") + " v" +  System.getProperty("os.version")
-summary['User name'] = System.getProperty("user.name") //User's account name
-
-summary['Container Engine'] = workflow.containerEngine
-if(workflow.containerEngine) summary['Container'] = workflow.container
-summary['HUMAnN'] = params.docker_container_humann3
-summary['MetaPhlAn'] = params.docker_container_metaphlan
-summary['MultiQC'] = params.docker_container_multiqc
-
-//General
-summary['Running parameters'] = ""
-summary['Sample Sheet'] = params.input
-summary['Layout'] = params.singleEnd ? 'Single-End' : 'Paired-End'
-summary['Data Type'] = params.rna ? 'Metatranscriptomic' : 'Metagenomic'
-summary['Merge Reads'] = params.mergeReads
-
-//BowTie2 databases for metaphlan
-summary['MetaPhlAn parameters'] = ""
-summary['MetaPhlAn database'] = params.metaphlan_db
-summary['Bowtie2 options'] = params.bt2options
-
-// ChocoPhlAn and UniRef databases
-summary['HUMAnN parameters'] = ""
-summary['Taxonomic Profile'] = params.taxonomic_profile
-summary['Chocophlan database'] = params.chocophlan
-summary['Uniref database'] = params.uniref
-
-//Folders
-summary['Folders'] = ""
-summary['Output dir'] = workingpath
-summary['Working dir'] = workflow.workDir
-summary['Output dir'] = params.outdir
-summary['Script dir'] = workflow.projectDir
-summary['Lunching dir'] = workflow.launchDir
-
-log.info summary.collect { k,v -> "${k.padRight(27)}: $v" }.join("\n")
-log.info ""
 
 
 /**
@@ -167,16 +75,24 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 
 
 def output_exists(meta) {
-  run = meta.run
-  name = meta.id
-  pathcoverage_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
-  genefamilies_file = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
-  pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
+  def run = meta.run
+  def name = meta.id
+  def pathcoverage_file  = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
+  def genefamilies_file  = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
+  def pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
   return pathcoverage_file.exists() && genefamilies_file.exists() && pathabundance_file.exists()
 }
 
 
 workflow {
+  if (params.version) { versionMessage(); exit 0 }
+  if (params.help)    { helpMessage();    exit 0 }
+
+  log.info """\
+    [PIPELINE] nf-reads-profiler ${workflow.manifest.version} | profile=${workflow.profile}
+    [WORKDIR]  ${workflow.workDir}
+    """.stripIndent()
+
   // Parse input samplesheet using nf-validation plugin
   Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
       .branch {
@@ -225,7 +141,7 @@ workflow {
     .set { sra_reads }
 
   // Merge all read channels
-  reads_ch = Channel.empty()
+  reads_ch = channel.empty()
       .mix(local_reads)
       .mix(sra_reads)
 
@@ -234,20 +150,21 @@ workflow {
     
     // Split into passing and failing samples based on read count
     count_reads.out.read_info
+        .map { meta, reads, count_file -> [meta, reads, count_file.text.trim().toInteger()] }
         .branch {
-            pass: it[2].toInteger() >= params.minreads
+            pass: { _meta, _reads, count -> count >= params.minreads }
             fail: true
         }
         .set { read_check }
-    
+
     // Log filtered samples
     read_check.fail
-        .map { meta, reads, count -> 
+        .map { meta, reads, count ->
             log.info "Skipping sample ${meta.id} due to insufficient reads: ${count} < ${params.minreads}"
         }
 
     // Process passing samples
-    clean_reads(read_check.pass.map { meta, reads, count -> [meta, reads] })
+    clean_reads(read_check.pass.map { meta, reads, _count -> [meta, reads] })
 
   merged_reads = clean_reads.out.reads_cleaned
 
@@ -255,12 +172,14 @@ workflow {
   profile_taxa(merged_reads)
 
 
-  ch_filtered_reads = merged_reads.filter { meta, reads -> !output_exists(meta) }
-  
+  // Skip samples whose HUMAnN outputs already exist (production resume optimisation)
+  ch_filtered_reads = params.skipCompleted
+    ? merged_reads.filter { meta, _reads -> !output_exists(meta) }
+    : merged_reads
 
   // Functional profiling (HUMAnN4) if not skipped
   if ( ! params.skipHumann ) {
-    profile_function(merged_reads)
+    profile_function(ch_filtered_reads)
 
     ch_genefamilies = profile_function.out.profile_function_gf
                 .map { meta, table ->
@@ -325,40 +244,35 @@ workflow {
             
   combine_metaphlan_tables(ch_metaphlan)
 
-  // MEDI quantification workflow
+  // MEDI quantification workflow — I13 shortcut: diamond_unaligned → Kraken2 directly.
+  // Reads have already passed HUMAnN's nucleotide + protein filters; no fastp needed.
   if (params.enable_medi) {
-    // Check that required MEDI parameters are set
-    if (!params.medi_db_path || !params.medi_foods_file || !params.medi_food_contents_file) {
-      error "MEDI quantification requires: medi_db_path, medi_foods_file, and medi_food_contents_file parameters"
+    if (!params.medi_db_path || !params.medi_food_matches || !params.medi_food_contents) {
+      error "MEDI quantification requires: medi_db_path, medi_food_matches, and medi_food_contents parameters"
     }
-    
-    // Group raw reads (from FASTERQ_DUMP/local) by study for MEDI processing
-    // The MEDI subworkflow will handle fastp preprocessing internally
-    read_check.pass
-      .map{meta, reads, count -> 
-        // Create grouping metadata with study information
-        def group_meta = meta.subMap('run')  // Extract study grouping key
-        [group_meta, meta, reads]  // Use raw reads, not cleaned
-      }
-      .groupTuple(by: [0])  // Group by study
-      .map{group_meta, metas, reads_files ->
-        // Flatten back to individual sample format but maintain study grouping info
-        def study = group_meta.run
-        def samples = [metas, reads_files].transpose().collect{meta, reads -> [meta, reads]}
+    if (params.skipHumann) {
+      error "enable_medi requires skipHumann=false — MEDI uses HUMAnN diamond_unaligned reads"
+    }
+
+    // Group HUMAnN unaligned reads by study for MEDI
+    profile_function.out.unmapped_reads
+      .map { meta, reads -> [meta.run, meta, reads] }
+      .groupTuple(by: [0])
+      .map { study, metas, reads_files ->
+        def samples = [metas, reads_files].transpose().collect { m, r -> [m, r] }
         [study, samples]
       }
-      .set{studies_with_samples}
-    
-    // Pass all studies to MEDI subworkflow - it will process each study group
+      .set { studies_with_samples }
+
     MEDI_QUANT(
       studies_with_samples,
-      params.medi_foods_file,
-      params.medi_food_contents_file
+      params.medi_food_matches,
+      params.medi_food_contents
     )
   }
 
   // Split stratified tables for biom files
-  if (!params.skipHumann && params.annotation) {
+  if (!params.skipHumann) {
 
     
 
@@ -380,8 +294,8 @@ workflow {
     // Process HUMAnN tables if enabled
     if (params.process_humann_tables) {
       // Use only the genefamilies combined tables for processing
-      ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, table -> 
-        meta.type == 'genefamilies' 
+      ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, _table ->
+        meta.type == 'genefamilies'
       }
       regroup_genefamilies(ch_combined_genefamilies)
     }
@@ -389,7 +303,7 @@ workflow {
   }
 
   // MultiQC setup
-  ch_multiqc_files = Channel.empty()
+  ch_multiqc_files = channel.empty()
   ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log.ifEmpty([]))
   // ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
   if ( ! params.skipHumann ) {
@@ -397,7 +311,7 @@ workflow {
   }
   
 
-  ch_multiqc_config = Channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
+  ch_multiqc_config = channel.fromPath("$projectDir/conf/multiqc_config.yaml", checkIfExists: true)
 
   ch_multiqc_runs = ch_multiqc_files.map {
               meta, table ->

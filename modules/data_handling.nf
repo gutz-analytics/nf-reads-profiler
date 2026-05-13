@@ -50,7 +50,7 @@ process FASTERQ_DUMP {
         $sra_file
 
     # Compress all fastq files
-    pigz -p $task.cpus *.fastq
+    pigz *.fastq
 
     # Create directory for processed files
     mkdir -p processed

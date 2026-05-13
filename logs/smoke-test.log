@@ -1,0 +1,2011 @@
+================================================================================
+smoke-test running log
+================================================================================
+
+[2026-04-26] Session summary — context for this and future smoke runs
+--------------------------------------------------------------------------------
+
+Files present (all untracked on branch ongoing-infra):
+  - infra/smoke-test.sh                  — I05 driver script, ~159 lines
+  - assets/samplesheet-smoke-child.csv   — 2 SRA samples: SRR6664374, SRR6664342
+                                           (study_accession=STUDY_SRA)
+
+Known discrepancies vs. the I05 spec (issues/I05-smoke-test.md), still unresolved:
+  1. Spec checks MetaPhlAn TSV (*_profile.tsv) for >50 features.
+     Script checks the .biom file (*_metaphlan.biom) for >1KB only.
+  2. Script hardcodes HUMAnN filename suffixes (_2_genefamilies.tsv,
+     _4_pathabundance.tsv) — must match actual workflow output naming.
+  These may produce false FAILs at the validation step even with a healthy run.
+
+--------------------------------------------------------------------------------
+First run attempt (DEAD — abandoned mid-pipeline)
+--------------------------------------------------------------------------------
+Project:   smoke-20260426-025416
+Launched:  2026-04-26 02:54 UTC, directly via `nextflow run` (NOT through
+           smoke-test.sh, so no validation step queued).
+Command:   nextflow run main.nf -profile aws \
+             --input s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv \
+             --project "smoke-$(date +%Y%m%d-%H%M%S)" 2>&1 | head -80
+
+Failure mode: stdout piped to `head -80`. Once Nextflow logged past line 80,
+`head` closed the pipe; next write SIGPIPE'd the JVM. Driver died silently.
+
+Batch jobs that did run before the driver died (both SUCCEEDED):
+  - count_reads_SRR6664342  job 9457be81-34fe-47f9-8518-003a6d593648
+  - count_reads_SRR6664374  job a903f000-6737-4a73-8eeb-eee0d45090a2
+No clean_reads / profile_taxa / profile_function jobs were ever submitted
+because the driver was gone.
+
+--------------------------------------------------------------------------------
+Lesson for future runs
+--------------------------------------------------------------------------------
+Never pipe `nextflow run` through `head` / `tail` / any consumer that may close
+its stdin early. Redirect to a file with `> log 2>&1`, and use nohup +
+background + </dev/null so the driver survives shell exits.
+
+================================================================================
+Run #2 — relaunched via infra/smoke-test.sh
+================================================================================
+=== Pre-flight checks ===
+  OK: spot-queue is ENABLED
+  OK: 2 compute environments ENABLED/VALID
+  OK: S3 runs bucket accessible
+  Uploading samplesheet to S3...
+  OK: Samplesheet uploaded to s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv
+
+=== Running pipeline (project: smoke-20260426-030202) ===
+  Start: Sun Apr 26 03:02:05 UTC 2026
+
+[1m[38;5;232m[48;5;43m N E X T F L O W [0;2m  ~  [mversion 25.10.4[m
+[K
+Launching[35m `main.nf` [0;2m[[0;1;36mjovial_swanson[0;2m] DSL2 - [36mrevision: [0;36meffb208e58[m
+[K
+---------------------------------------------
+nf-reads-profiler
+---------------------------------------------
+
+Analysis introspection:
+
+
+Starting time              : Sun Apr 26 03:02:10 UTC 2026
+Environment                : 
+Pipeline Name              : nf-reads-profiler
+Pipeline Version           : 0.0.3
+Config Profile             : aws
+Resumed                    : false
+Nextflow version           : 25.10.4 build 11173 (10-02-2026 15:17 UTC)
+Java version               : 23.0.1-internal
+Java Virtual Machine       : OpenJDK 64-Bit Server VM(23.0.1-internal-adhoc.conda.src)
+Operating system           : Linux aarch64 v6.17.0-1010-aws
+User name                  : ubuntu
+Container Engine           : docker
+Container                  : [:]
+HUMAnN                     : barbarahelena/humann:4.0.3
+MetaPhlAn                  : colinbrislawn/metaphlan:4.2.4
+MultiQC                    : ghcr.io/multiqc/multiqc:v1.22.3
+Running parameters         : 
+Sample Sheet               : s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv
+Layout                     : Paired-End
+Merge Reads                : false
+MetaPhlAn parameters       : 
+MetaPhlAn database         : /mnt/dbs/metaphlan_databases/vJan25/
+Bowtie2 options (direct)   : very-sensitive
+Bowtie2 options (humann)   : very-sensitive
+HUMAnN parameters          : 
+Chocophlan database        : /mnt/dbs/chocophlan_v4_alpha/
+Uniref database            : /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/
+Folders                    : 
+Output dir                 : s3://gutz-nf-reads-profilers-runs/results/
+Working dir                : /gutz-nf-reads-profilers-workdir/
+Script dir                 : /home/ubuntu/github/nf-reads-profiler
+Lunching dir               : /home/ubuntu/github/nf-reads-profiler
+Uploading local `bin` scripts folder to s3://gutz-nf-reads-profilers-workdir/tmp/65/537e4ce627cafce8b625b59833784a/bin
+[2m[[0;34m-        [0;2m] [0;2m[mAWS_DOWNLOAD                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[11A
+[2m[[0;34m-        [0;2m] [0;2m[mAWS_DOWNLOAD                  [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[13A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34maa/cd6d9d[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                  [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (4)[m[K
+[2m[[0;34maa/cd6d9d[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m5b/1d5e9f[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (4)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m5b/1d5e9f[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m5b/1d5e9f[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                   [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (6)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m5b/1d5e9f[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34mfa/1749fe[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (6)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mfa/1749fe[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (7)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m83/b3ada8[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (7)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m83/b3ada8[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (8)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mfa/1749fe[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34m18/49ec2f[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (8)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mfa/1749fe[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 1 of 2[32m ✔[m[K
+[2m[[0;34m18/49ec2f[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (9)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m83/b3ada8[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m9e/c8a3ff[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (9)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m83/b3ada8[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m18/49ec2f[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (10)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m83/b3ada8[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m18/49ec2f[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34mc7/340eb3[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function              [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (11)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m83/b3ada8[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m18/49ec2f[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34mc7/340eb3[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m4c/fd9ab3[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (11)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m83/b3ada8[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m9e/c8a3ff[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mc7/340eb3[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m4c/fd9ab3[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[31mERROR ~ Error executing process > 'profile_function (SRR6664342)'[K
+[K
+Caused by:[K
+  The user value contains invalid characters. Enter a value that matches the pattern ^([a-z0-9_][a-z0-9_-]{0,30})$[K
+[K
+[K
+Command executed:[K
+[K
+  # HUMAnN 4 will run its own MetaPhlAn profiling internally[K
+  humann \[K
+    --input SRR6664342_trimmed.fq.gz \[K
+    --output . \[K
+     \[K
+    --output-basename SRR6664342 \[K
+    --nucleotide-database /mnt/dbs/chocophlan_v4_alpha/ \[K
+    --remove-column-description-output \[K
+    --protein-database /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/ \[K
+    --utility-database /mnt/dbs/full_mapping_v4_alpha/ \[K
+    --metaphlan-options "-t rel_ab_w_read_stats --index mpa_vOct22_CHOCOPhlAnSGB_202403 --bowtie2db /mnt/dbs/metaphlan_databases/vOct22/ --bt2_ps very-sensitive" \[K
+    --pathways metacyc \[K
+    --threads 8 \[K
+    --memory-use minimum[K
+  [K
+  # MultiQC doesn't have a module for humann yet. As a consequence, I[K
+  # had to create a YAML file with all the info I need via a bash script[K
+  bash scrape_profile_functions.sh SRR6664342 SRR6664342_0.log > SRR6664342_profile_functions_mqc.yaml[K
+[K
+Command exit status:[K
+  -[K
+[K
+Command output:[K
+  (empty)[K
+[K
+Work dir:[K
+  s3://gutz-nf-reads-profilers-workdir/4c/fd9ab3adcfdbeb0973eb743aab6c18[K
+[K
+Container:[K
+  barbarahelena/humann:4.0.3[K
+[K
+Tip: when you have fixed the problem you can continue the execution adding the option `-resume` to the run command line[K
+[K
+ -- Check '.nextflow.log' file for details[39m[K
+[7f/7b3fc3] Submitted process > profile_taxa (SRR6664374)
+[47/7522f1] Submitted process > profile_function (SRR6664374)
+[56A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34m7f/2b40bc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m94/62d499[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m83/b3ada8[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m9e/c8a3ff[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m7f/7b3fc3[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m47/7522f1[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664374[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m39/47269a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[33mWARN: Killing running tasks (1)[39m[K
+[31mERROR ~ Error executing process > 'profile_function (SRR6664342)'[K
+[K
+Caused by:[K
+  The user value contains invalid characters. Enter a value that matches the pattern ^([a-z0-9_][a-z0-9_-]{0,30})$[K
+[K
+[K
+Command executed:[K
+[K
+  # HUMAnN 4 will run its own MetaPhlAn profiling internally[K
+  humann \[K
+    --input SRR6664342_trimmed.fq.gz \[K
+    --output . \[K
+     \[K
+    --output-basename SRR6664342 \[K
+    --nucleotide-database /mnt/dbs/chocophlan_v4_alpha/ \[K
+    --remove-column-description-output \[K
+    --protein-database /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/ \[K
+    --utility-database /mnt/dbs/full_mapping_v4_alpha/ \[K
+    --metaphlan-options "-t rel_ab_w_read_stats --index mpa_vOct22_CHOCOPhlAnSGB_202403 --bowtie2db /mnt/dbs/metaphlan_databases/vOct22/ --bt2_ps very-sensitive" \[K
+    --pathways metacyc \[K
+    --threads 8 \[K
+    --memory-use minimum[K
+  [K
+  # MultiQC doesn't have a module for humann yet. As a consequence, I[K
+  # had to create a YAML file with all the info I need via a bash script[K
+  bash scrape_profile_functions.sh SRR6664342 SRR6664342_0.log > SRR6664342_profile_functions_mqc.yaml[K
+[K
+Command exit status:[K
+  -[K
+[K
+Command output:[K
+  (empty)[K
+[K
+Work dir:[K
+  s3://gutz-nf-reads-profilers-workdir/4c/fd9ab3adcfdbeb0973eb743aab6c18[K
+[K
+Container:[K
+  barbarahelena/humann:4.0.3[K
+[K
+Tip: when you have fixed the problem you can continue the execution adding the option `-resume` to the run command line[K
+[K
+ -- Check '.nextflow.log' file for details[39m[K
+
+
+================================================================================
+[2026-04-26] Run #2 result — FAILED (and what we learned)
+================================================================================
+
+Outcome: smoke-test.sh exited non-zero. Pipeline progressed to clean_reads (✔ 2/2),
+profile_taxa was Submitted, then both profile_function (SRR6664342, SRR6664374)
+failed at AWS Batch *job submission* with:
+
+  The user value contains invalid characters.
+  Enter a value that matches the pattern ^([a-z0-9_][a-z0-9_-]{0,30})$
+
+Diagnosis: this is what I00 was supposed to fix, but the I00 fix is WRONG.
+
+I00 (commit bb92a21, "Fix containerOptions escaping for AWS Batch") was already
+merged into ongoing-infra. It changed:
+  containerOptions '-u $(id -u):$(id -g)'   →
+  containerOptions '-u \$(id -u):\$(id -g)'
+on profile_function (line 67) and combine_humann_tables (line 117).
+
+Why that doesn't fix Batch: in a Groovy single-quoted string, '\$' is the two
+literal characters \ and $ — Nextflow forwards them verbatim. On the awsbatch
+executor there is no shell to expand $(id -u); Nextflow translates `-u <value>`
+into the ECS containerOverride `user` field, which Batch validates against the
+regex above. Either form ($(id... or \$(id...) fails identically.
+
+The escape is only meaningful for the local Docker executor, where the host
+shell expands $(id -u) before docker run sees it.
+
+Affected processes (all 5 in modules/community_characterisation.nf):
+   67  profile_function          — on the live AWS path, will fail every run
+  117  combine_humann_tables     — on the live AWS path, will fail next
+  235  convert_tables_to_biom    — currently dead code (biom branch commented out in main.nf)
+  272  split_stratified_tables   — on the live AWS path, would fail after combine
+  305  regroup_genefamilies      — currently dead code
+
+I00 doc claims 235/272/305 "already work correctly on AWS Batch". That claim is
+incorrect — those processes either never run (dead code) or haven't been
+reached yet (run aborts upstream).
+
+Fix plan (Option B): move containerOptions out of the module and into the local
+profile only. conf/test.config gets withName overrides for the 5 processes;
+modules/community_characterisation.nf has the lines removed. Net effect:
+  - AWS Batch: no `-u` user override, container runs as ECS-default user, Batch
+    accepts the job.
+  - Local Docker (test profile): same -u $(id -u):$(id -g) as today, output
+    files owned by the host user.
+
+[2026-04-26 fix applied — Option B]
+  modules/community_characterisation.nf: removed `containerOptions` from
+    profile_function (67), combine_humann_tables (117), convert_tables_to_biom
+    (235), split_stratified_tables (272), regroup_genefamilies (305).
+  conf/test.config: added `withName: '<5 processes>' { containerOptions =
+    '-u $(id -u):$(id -g)' }` so local Docker still gets host-uid mapping.
+  AWS Batch profile: no override — Batch will run jobs as the ECS-default user,
+    which passes the regex.
+
+================================================================================
+Run #3 — relaunched via infra/smoke-test.sh after Option B fix
+================================================================================
+=== Pre-flight checks ===
+  OK: spot-queue is ENABLED
+  OK: 2 compute environments ENABLED/VALID
+  OK: S3 runs bucket accessible
+  Uploading samplesheet to S3...
+  OK: Samplesheet uploaded to s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv
+
+=== Running pipeline (project: smoke-20260426-031419) ===
+  Start: Sun Apr 26 03:14:22 UTC 2026
+
+[1m[38;5;232m[48;5;43m N E X T F L O W [0;2m  ~  [mversion 25.10.4[m
+[K
+Launching[35m `main.nf` [0;2m[[0;1;36mevil_colden[0;2m] DSL2 - [36mrevision: [0;36meffb208e58[m
+[K
+---------------------------------------------
+nf-reads-profiler
+---------------------------------------------
+
+Analysis introspection:
+
+
+Starting time              : Sun Apr 26 03:14:27 UTC 2026
+Environment                : 
+Pipeline Name              : nf-reads-profiler
+Pipeline Version           : 0.0.3
+Config Profile             : aws
+Resumed                    : false
+Nextflow version           : 25.10.4 build 11173 (10-02-2026 15:17 UTC)
+Java version               : 23.0.1-internal
+Java Virtual Machine       : OpenJDK 64-Bit Server VM(23.0.1-internal-adhoc.conda.src)
+Operating system           : Linux aarch64 v6.17.0-1010-aws
+User name                  : ubuntu
+Container Engine           : docker
+Container                  : [:]
+HUMAnN                     : barbarahelena/humann:4.0.3
+MetaPhlAn                  : colinbrislawn/metaphlan:4.2.4
+MultiQC                    : ghcr.io/multiqc/multiqc:v1.22.3
+Running parameters         : 
+Sample Sheet               : s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv
+Layout                     : Paired-End
+Merge Reads                : false
+MetaPhlAn parameters       : 
+MetaPhlAn database         : /mnt/dbs/metaphlan_databases/vJan25/
+Bowtie2 options (direct)   : very-sensitive
+Bowtie2 options (humann)   : very-sensitive
+HUMAnN parameters          : 
+Chocophlan database        : /mnt/dbs/chocophlan_v4_alpha/
+Uniref database            : /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/
+Folders                    : 
+Output dir                 : s3://gutz-nf-reads-profilers-runs/results/
+Working dir                : /gutz-nf-reads-profilers-workdir/
+Script dir                 : /home/ubuntu/github/nf-reads-profiler
+Lunching dir               : /home/ubuntu/github/nf-reads-profiler
+Uploading local `bin` scripts folder to s3://gutz-nf-reads-profilers-workdir/tmp/ff/88066dad29848862ad844f7eaf222a/bin
+[2m[[0;34m-        [0;2m] [0;2m[mAWS_DOWNLOAD                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[13A
+[2m[[0;34m-        [0;2m] [0;2m[mAWS_DOWNLOAD                  [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[13A
+[2mexecutor >  awsbatch (2)[m[K
+[2m[[0;34me0/8188c8[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me0/8188c8[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf2/51b76e[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me0/8188c8[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf2/51b76e[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me0/8188c8[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf2/51b76e[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me0/8188c8[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf2/51b76e[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[33mWARN: Killing running tasks (2)[39m[K
+
+
+[2026-04-26 fix committed at 988ad44 on ongoing-infra]
+
+================================================================================
+Run #4 — relaunched via infra/smoke-test.sh on 988ad44
+================================================================================
+=== Pre-flight checks ===
+  OK: spot-queue is ENABLED
+  OK: 2 compute environments ENABLED/VALID
+  OK: S3 runs bucket accessible
+  Uploading samplesheet to S3...
+  OK: Samplesheet uploaded to s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv
+
+=== Running pipeline (project: smoke-20260426-031600) ===
+  Start: Sun Apr 26 03:16:03 UTC 2026
+
+[1m[38;5;232m[48;5;43m N E X T F L O W [0;2m  ~  [mversion 25.10.4[m
+[K
+Launching[35m `main.nf` [0;2m[[0;1;36mhigh_jepsen[0;2m] DSL2 - [36mrevision: [0;36meffb208e58[m
+[K
+---------------------------------------------
+nf-reads-profiler
+---------------------------------------------
+
+Analysis introspection:
+
+
+Starting time              : Sun Apr 26 03:16:09 UTC 2026
+Environment                : 
+Pipeline Name              : nf-reads-profiler
+Pipeline Version           : 0.0.3
+Config Profile             : aws
+Resumed                    : false
+Nextflow version           : 25.10.4 build 11173 (10-02-2026 15:17 UTC)
+Java version               : 23.0.1-internal
+Java Virtual Machine       : OpenJDK 64-Bit Server VM(23.0.1-internal-adhoc.conda.src)
+Operating system           : Linux aarch64 v6.17.0-1010-aws
+User name                  : ubuntu
+Container Engine           : docker
+Container                  : [:]
+HUMAnN                     : barbarahelena/humann:4.0.3
+MetaPhlAn                  : colinbrislawn/metaphlan:4.2.4
+MultiQC                    : ghcr.io/multiqc/multiqc:v1.22.3
+Running parameters         : 
+Sample Sheet               : s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv
+Layout                     : Paired-End
+Merge Reads                : false
+MetaPhlAn parameters       : 
+MetaPhlAn database         : /mnt/dbs/metaphlan_databases/vJan25/
+Bowtie2 options (direct)   : very-sensitive
+Bowtie2 options (humann)   : very-sensitive
+HUMAnN parameters          : 
+Chocophlan database        : /mnt/dbs/chocophlan_v4_alpha/
+Uniref database            : /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/
+Folders                    : 
+Output dir                 : s3://gutz-nf-reads-profilers-runs/results/
+Working dir                : /gutz-nf-reads-profilers-workdir/
+Script dir                 : /home/ubuntu/github/nf-reads-profiler
+Lunching dir               : /home/ubuntu/github/nf-reads-profiler
+Uploading local `bin` scripts folder to s3://gutz-nf-reads-profilers-workdir/tmp/52/5abae665e4eb395a7f05b80319424c/bin
+[2m[[0;34m-        [0;2m] [0;2m[mAWS_DOWNLOAD                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[13A
+[2m[[0;34m-        [0;2m] [0;2m[mAWS_DOWNLOAD                  [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[13A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me7/c00bbc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me7/c00bbc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me7/c00bbc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me7/c00bbc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me7/c00bbc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34me7/c00bbc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                  [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (4)[m[K
+[2m[[0;34me7/c00bbc[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m69/5f4b9f[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (4)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m69/5f4b9f[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m69/5f4b9f[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                   [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (6)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m69/5f4b9f[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m20/5a9da3[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (6)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m20/5a9da3[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (8)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34mdf/7e839d[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (8)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34mdf/7e839d[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (8)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 1 of 2[32m ✔[m[K
+[2m[[0;34mdf/7e839d[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (9)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md0/8798a4[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (9)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdf/7e839d[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                  [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (10)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdf/7e839d[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34m0a/9f31ee[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function              [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (11)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdf/7e839d[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664374[2m)[m      [2m |[m 1 of 2[K
+[2m[[0;34m0a/9f31ee[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m4c/45cbab[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664374[2m)[m [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (11)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md0/8798a4[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m0a/9f31ee[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m4c/45cbab[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664374[2m)[m [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md0/8798a4[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m38/09585b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34mbb/3b2c8b[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md0/8798a4[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m38/09585b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34mbb/3b2c8b[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md0/8798a4[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m38/09585b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34mbb/3b2c8b[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md0/8798a4[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m38/09585b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34mbb/3b2c8b[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[31mERROR ~ Error executing process > 'profile_function (SRR6664374)'[K
+[K
+Caused by:[K
+  Essential container in task exited[K
+[K
+[K
+Command executed:[K
+[K
+  # HUMAnN 4 will run its own MetaPhlAn profiling internally[K
+  humann \[K
+    --input SRR6664374_trimmed.fq.gz \[K
+    --output . \[K
+     \[K
+    --output-basename SRR6664374 \[K
+    --nucleotide-database /mnt/dbs/chocophlan_v4_alpha/ \[K
+    --remove-column-description-output \[K
+    --protein-database /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/ \[K
+    --utility-database /mnt/dbs/full_mapping_v4_alpha/ \[K
+    --metaphlan-options "-t rel_ab_w_read_stats --index mpa_vOct22_CHOCOPhlAnSGB_202403 --bowtie2db /mnt/dbs/metaphlan_databases/vOct22/ --bt2_ps very-sensitive" \[K
+    --pathways metacyc \[K
+    --threads 8 \[K
+    --memory-use minimum[K
+  [K
+  # MultiQC doesn't have a module for humann yet. As a consequence, I[K
+  # had to create a YAML file with all the info I need via a bash script[K
+  bash scrape_profile_functions.sh SRR6664374 SRR6664374_0.log > SRR6664374_profile_functions_mqc.yaml[K
+[K
+Command exit status:[K
+  1[K
+[K
+Command output:[K
+  Output files will be written to: /tmp/nxf.ZXBTM0khR6[K
+  Decompressing gzipped file ...[K
+  [K
+  Removing spaces from identifiers in input file ...[K
+[K
+Command error:[K
+  Output files will be written to: /tmp/nxf.ZXBTM0khR6[K
+  Decompressing gzipped file ...[K
+  Removing spaces from identifiers in input file ...[K
+  CRITICAL ERROR: The directory provided for the ChocoPhlAn database at /mnt/dbs/chocophlan_v4_alpha/ does not exist. Please select another directory.[K
+[K
+Work dir:[K
+  s3://gutz-nf-reads-profilers-workdir/4c/45cbab8ba647af52f5c5f2b74cf3eb[K
+[K
+Container:[K
+  barbarahelena/humann:4.0.3[K
+[K
+Tip: when you have fixed the problem you can continue the execution adding the option `-resume` to the run command line[K
+[K
+ -- Check '.nextflow.log' file for details[39m[K
+[65A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mdc/85db20[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mb9/06c18b[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m04/4ecdbb[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md0/8798a4[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m38/09585b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34mbb/3b2c8b[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m0f/92f73d[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[33mWARN: Killing running tasks (3)[39m[K
+[31mERROR ~ Error executing process > 'profile_function (SRR6664374)'[K
+[K
+Caused by:[K
+  Essential container in task exited[K
+[K
+[K
+Command executed:[K
+[K
+  # HUMAnN 4 will run its own MetaPhlAn profiling internally[K
+  humann \[K
+    --input SRR6664374_trimmed.fq.gz \[K
+    --output . \[K
+     \[K
+    --output-basename SRR6664374 \[K
+    --nucleotide-database /mnt/dbs/chocophlan_v4_alpha/ \[K
+    --remove-column-description-output \[K
+    --protein-database /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/ \[K
+    --utility-database /mnt/dbs/full_mapping_v4_alpha/ \[K
+    --metaphlan-options "-t rel_ab_w_read_stats --index mpa_vOct22_CHOCOPhlAnSGB_202403 --bowtie2db /mnt/dbs/metaphlan_databases/vOct22/ --bt2_ps very-sensitive" \[K
+    --pathways metacyc \[K
+    --threads 8 \[K
+    --memory-use minimum[K
+  [K
+  # MultiQC doesn't have a module for humann yet. As a consequence, I[K
+  # had to create a YAML file with all the info I need via a bash script[K
+  bash scrape_profile_functions.sh SRR6664374 SRR6664374_0.log > SRR6664374_profile_functions_mqc.yaml[K
+[K
+Command exit status:[K
+  1[K
+[K
+Command output:[K
+  Output files will be written to: /tmp/nxf.ZXBTM0khR6[K
+  Decompressing gzipped file ...[K
+  [K
+  Removing spaces from identifiers in input file ...[K
+[K
+Command error:[K
+  Output files will be written to: /tmp/nxf.ZXBTM0khR6[K
+  Decompressing gzipped file ...[K
+  Removing spaces from identifiers in input file ...[K
+  CRITICAL ERROR: The directory provided for the ChocoPhlAn database at /mnt/dbs/chocophlan_v4_alpha/ does not exist. Please select another directory.[K
+[K
+Work dir:[K
+  s3://gutz-nf-reads-profilers-workdir/4c/45cbab8ba647af52f5c5f2b74cf3eb[K
+[K
+Container:[K
+  barbarahelena/humann:4.0.3[K
+[K
+Tip: when you have fixed the problem you can continue the execution adding the option `-resume` to the run command line[K
+[K
+ -- Check '.nextflow.log' file for details[39m[K
+
+
+================================================================================
+[2026-04-26] Run #4 result — FAILED (different error, root cause: stack drift)
+================================================================================
+
+profile_function failed on both samples with:
+  CRITICAL ERROR: The directory provided for the ChocoPhlAn database at
+  /mnt/dbs/chocophlan_v4_alpha/ does not exist.
+
+Worker EC2 i-0933e4fcd43ccb6e4, instance type r7g.2xlarge, OnDemand CE.
+Userdata trace shows it ran: miniconda install → awscli install → aws --version
+→ "user data done", in 31 seconds. The aws s3 sync to populate /mnt/dbs/ was
+NOT in the executed userdata.
+
+Diagnosis: stack drift. Live launch template (lt-0d9193dd0f66d68ee, $Latest=v8)
+does not contain the `/mnt/dbs` S3 sync block. The block exists in
+infra/batch-stack.yaml in the working tree but the stack was last updated
+2026-04-23 20:27 UTC, before the sync block was added.
+
+Relevant commits not yet deployed:
+  896ea1f 2026-04-24  AWS Batch infra: Graviton workers with /mnt/dbs S3-sync
+  f9ee659 2026-04-25  Parameterize DB source bucket in CloudFormation (I01)
+
+Source DB bucket s3://cjb-gutz-s3-demo/ is healthy: 30094 objects, 44.8 GB,
+includes chocophlan_v4_alpha/, full_mapping_v4_alpha/, metaphlan_databases/,
+uniref90_annotated_v4_alpha_ec_filtered/, referencedata/.
+
+Fix required: deploy infra/batch-stack.yaml to push a new launch template
+version with the sync block. Subsequent workers will populate /mnt/dbs/ before
+ECS accepts tasks. First smoke run after deploy: ~10-min cold-start as the 45GB
+sync runs on the first worker.
+
+================================================================================
+[2026-04-26] Pre-deploy state — committed and ready
+================================================================================
+
+Smoke test artifacts committed at 64eaeac on ongoing-infra:
+  assets/samplesheet-smoke-child.csv
+  infra/smoke-test.sh
+
+Branch state (HEAD on ongoing-infra):
+  64eaeac  Add I05 smoke test: driver script + 2-sample CHILD samplesheet
+  988ad44  Move containerOptions UID mapping out of modules to test profile
+  4a67806  Merge branch 'I10-production-playbook' into ongoing-infra
+  ...
+
+CloudFormation changeset created (no-execute) for stack
+nf-reads-profiler-batch in us-east-2:
+  ChangeSet ARN:
+    arn:aws:cloudformation:us-east-2:730883236839:changeSet/awscli-cloudformation-package-deploy-1777174931/0be4579f-7fec-405a-9303-0f03df3a9569
+
+Changeset summary:
+  - No actual replacements (CE "Conditional" flags are upstream-Ref-driven
+    only; the upstream resources are not replacing).
+  - BatchWorkerLaunchTemplate: new version with /mnt/dbs S3-sync block.
+  - EcsInstanceRole: policy adds S3 read on cjb-gutz-s3-demo + workdir bucket.
+  - BatchJobRole, NextflowRunnerPolicy, BatchServiceRole, BatchDashboard,
+    BatchJobStateRule, alarms, budgets, log group: non-disruptive edits.
+  - No bucket replacement; queue stays up; running orphan job from run #2
+    will not be interrupted.
+
+Apply command (gated on user approval):
+  aws cloudformation execute-change-set \
+    --change-set-name <ARN above> --region us-east-2
+
+After apply, first worker spawn does a 45 GB S3 sync (~5-15 min cold start)
+before HUMAnN can run. Subsequent jobs reuse warm workers.
+
+[2026-04-26 03:50 UTC] CloudFormation changeset executed.
+  Stack:       nf-reads-profiler-batch (UPDATE_COMPLETE)
+  Duration:    ~4 min
+  Launch tmpl: lt-0d9193dd0f66d68ee  v8 -> v9
+  v9 confirmed to contain:
+    mkdir -p /mnt/dbs
+    /opt/conda-aws/bin/aws s3 sync s3://cjb-gutz-s3-demo /mnt/dbs/ ...
+    systemctl restart ecs
+
+================================================================================
+Run #5 — relaunched after stack update on commit 64eaeac
+================================================================================
+Note: first worker spawn after this point does a cold-start 45 GB S3 sync to
+populate /mnt/dbs/ before ECS accepts tasks. Expect ~5-15 min of "no
+progress" on the Nextflow side while the worker is provisioning. Subsequent
+jobs reuse the warm worker.
+=== Pre-flight checks ===
+  OK: spot-queue is ENABLED
+  OK: 2 compute environments ENABLED/VALID
+  OK: S3 runs bucket accessible
+  Uploading samplesheet to S3...
+  OK: Samplesheet uploaded to s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv
+
+=== Running pipeline (project: smoke-20260426-035229) ===
+  Start: Sun Apr 26 03:52:32 UTC 2026
+
+[1m[38;5;232m[48;5;43m N E X T F L O W [0;2m  ~  [mversion 25.10.4[m
+[K
+Launching[35m `main.nf` [0;2m[[0;1;36mcondescending_swirles[0;2m] DSL2 - [36mrevision: [0;36meffb208e58[m
+[K
+---------------------------------------------
+nf-reads-profiler
+---------------------------------------------
+
+Analysis introspection:
+
+
+Starting time              : Sun Apr 26 03:52:38 UTC 2026
+Environment                : 
+Pipeline Name              : nf-reads-profiler
+Pipeline Version           : 0.0.3
+Config Profile             : aws
+Resumed                    : false
+Nextflow version           : 25.10.4 build 11173 (10-02-2026 15:17 UTC)
+Java version               : 23.0.1-internal
+Java Virtual Machine       : OpenJDK 64-Bit Server VM(23.0.1-internal-adhoc.conda.src)
+Operating system           : Linux aarch64 v6.17.0-1010-aws
+User name                  : ubuntu
+Container Engine           : docker
+Container                  : [:]
+HUMAnN                     : barbarahelena/humann:4.0.3
+MetaPhlAn                  : colinbrislawn/metaphlan:4.2.4
+MultiQC                    : ghcr.io/multiqc/multiqc:v1.22.3
+Running parameters         : 
+Sample Sheet               : s3://gutz-nf-reads-profilers-runs/samplesheets/samplesheet-smoke-child.csv
+Layout                     : Paired-End
+Merge Reads                : false
+MetaPhlAn parameters       : 
+MetaPhlAn database         : /mnt/dbs/metaphlan_databases/vJan25/
+Bowtie2 options (direct)   : very-sensitive
+Bowtie2 options (humann)   : very-sensitive
+HUMAnN parameters          : 
+Chocophlan database        : /mnt/dbs/chocophlan_v4_alpha/
+Uniref database            : /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/
+Folders                    : 
+Output dir                 : s3://gutz-nf-reads-profilers-runs/results/
+Working dir                : /gutz-nf-reads-profilers-workdir/
+Script dir                 : /home/ubuntu/github/nf-reads-profiler
+Lunching dir               : /home/ubuntu/github/nf-reads-profiler
+Uploading local `bin` scripts folder to s3://gutz-nf-reads-profilers-workdir/tmp/cb/3524e0272f45a7433d15be9aff4963/bin
+[2m[[0;34m-        [0;2m] [0;2m[mAWS_DOWNLOAD                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[13A
+[2m[[0;34m-        [0;2m] [0;2m[mAWS_DOWNLOAD                  [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[13A
+[2mexecutor >  awsbatch (1)[m[K
+[2m[[0;34m32/bd0ec8[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34m-        [0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (3)[m[K
+[2m[[0;34m32/bd0ec8[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mFASTERQ_DUMP                  [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (4)[m[K
+[2m[[0;34m32/bd0ec8[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 1 of 2[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 1[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (4)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m97/5eaf94[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m97/5eaf94[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (5)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mcount_reads                   [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (7)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (7)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                    -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (7)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mclean_reads                   [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (9)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (9)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                   -[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function               -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (9)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_taxa                  [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mprofile_function              [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdd/bb804b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m6c/8956b1[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdd/bb804b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m6c/8956b1[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdd/bb804b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m6c/8956b1[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdd/bb804b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m6c/8956b1[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[14A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdd/bb804b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m6c/8956b1[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664342[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[31mERROR ~ Error executing process > 'profile_function (SRR6664342)'[K
+[K
+Caused by:[K
+  Essential container in task exited[K
+[K
+[K
+Command executed:[K
+[K
+  # HUMAnN 4 will run its own MetaPhlAn profiling internally[K
+  humann \[K
+    --input SRR6664342_trimmed.fq.gz \[K
+    --output . \[K
+     \[K
+    --output-basename SRR6664342 \[K
+    --nucleotide-database /mnt/dbs/chocophlan_v4_alpha/ \[K
+    --remove-column-description-output \[K
+    --protein-database /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/ \[K
+    --utility-database /mnt/dbs/full_mapping_v4_alpha/ \[K
+    --metaphlan-options "-t rel_ab_w_read_stats --index mpa_vOct22_CHOCOPhlAnSGB_202403 --bowtie2db /mnt/dbs/metaphlan_databases/vOct22/ --bt2_ps very-sensitive" \[K
+    --pathways metacyc \[K
+    --threads 8 \[K
+    --memory-use minimum[K
+  [K
+  # MultiQC doesn't have a module for humann yet. As a consequence, I[K
+  # had to create a YAML file with all the info I need via a bash script[K
+  bash scrape_profile_functions.sh SRR6664342 SRR6664342_0.log > SRR6664342_profile_functions_mqc.yaml[K
+[K
+Command exit status:[K
+  1[K
+[K
+Command output:[K
+  Output files will be written to: /tmp/nxf.hi8zgxfKMj[K
+  Decompressing gzipped file ...[K
+  [K
+  Removing spaces from identifiers in input file ...[K
+[K
+Command error:[K
+  Output files will be written to: /tmp/nxf.hi8zgxfKMj[K
+  Decompressing gzipped file ...[K
+  Removing spaces from identifiers in input file ...[K
+  CRITICAL ERROR: The directory provided for the ChocoPhlAn database at /mnt/dbs/chocophlan_v4_alpha/ does not exist. Please select another directory.[K
+[K
+Work dir:[K
+  s3://gutz-nf-reads-profilers-workdir/6c/8956b197e62fadc152de92d507eb83[K
+[K
+Container:[K
+  barbarahelena/humann:4.0.3[K
+[K
+Tip: you can try to figure out what's wrong by changing to the process work dir and showing the script file named `.command.sh`[K
+[K
+ -- Check '.nextflow.log' file for details[39m[K
+[65A
+[2mexecutor >  awsbatch (13)[m[K
+[2m[[0;34mb8/8273c2[0;2m] [0;2m[mAWS_DOWNLOAD[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34m19/5c9f55[0;2m] [0;2m[mFASTERQ_DUMP[33;2m ([0;33mSRR6664374[2m)[m     [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mee/bf7d97[0;2m] [0;2m[mcount_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34md6/c74932[0;2m] [0;2m[mclean_reads[33;2m ([0;33mSRR6664342[2m)[m      [2m |[m 2 of 2[32m ✔[m[K
+[2m[[0;34mdd/bb804b[0;2m] [0;2m[mprofile_taxa[33;2m ([0;33mSRR6664342[2m)[m     [2m |[m 0 of 2[K
+[2m[[0;34m10/89249c[0;2m] [0;2m[mprofile_function[33;2m ([0;33mSRR6664374[2m)[m [2m |[m 0 of 2[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_tables          -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_humann_taxonomy_tables -[K
+[2m[[0;34m-        [0;2m] [0;2m[mcombine_metaphlan_tables       -[K
+[2m[[0;34m-        [0;2m] [0;2m[msplit_stratified_tables        -[K
+[2m[[0;34mf4/8ce23a[0;2m] [0;2m[mget_software_versions         [2m |[m 1 of 1[32m ✔[m[K
+[2m[[0;34m-        [0;2m] [0;2m[mMULTIQC                        -[K
+[33mWARN: Killing running tasks (3)[39m[K
+[31mERROR ~ Error executing process > 'profile_function (SRR6664342)'[K
+[K
+Caused by:[K
+  Essential container in task exited[K
+[K
+[K
+Command executed:[K
+[K
+  # HUMAnN 4 will run its own MetaPhlAn profiling internally[K
+  humann \[K
+    --input SRR6664342_trimmed.fq.gz \[K
+    --output . \[K
+     \[K
+    --output-basename SRR6664342 \[K
+    --nucleotide-database /mnt/dbs/chocophlan_v4_alpha/ \[K
+    --remove-column-description-output \[K
+    --protein-database /mnt/dbs/uniref90_annotated_v4_alpha_ec_filtered/ \[K
+    --utility-database /mnt/dbs/full_mapping_v4_alpha/ \[K
+    --metaphlan-options "-t rel_ab_w_read_stats --index mpa_vOct22_CHOCOPhlAnSGB_202403 --bowtie2db /mnt/dbs/metaphlan_databases/vOct22/ --bt2_ps very-sensitive" \[K
+    --pathways metacyc \[K
+    --threads 8 \[K
+    --memory-use minimum[K
+  [K
+  # MultiQC doesn't have a module for humann yet. As a consequence, I[K
+  # had to create a YAML file with all the info I need via a bash script[K
+  bash scrape_profile_functions.sh SRR6664342 SRR6664342_0.log > SRR6664342_profile_functions_mqc.yaml[K
+[K
+Command exit status:[K
+  1[K
+[K
+Command output:[K
+  Output files will be written to: /tmp/nxf.hi8zgxfKMj[K
+  Decompressing gzipped file ...[K
+  [K
+  Removing spaces from identifiers in input file ...[K
+[K
+Command error:[K
+  Output files will be written to: /tmp/nxf.hi8zgxfKMj[K
+  Decompressing gzipped file ...[K
+  Removing spaces from identifiers in input file ...[K
+  CRITICAL ERROR: The directory provided for the ChocoPhlAn database at /mnt/dbs/chocophlan_v4_alpha/ does not exist. Please select another directory.[K
+[K
+Work dir:[K
+  s3://gutz-nf-reads-profilers-workdir/6c/8956b197e62fadc152de92d507eb83[K
+[K
+Container:[K
+  barbarahelena/humann:4.0.3[K
+[K
+Tip: you can try to figure out what's wrong by changing to the process work dir and showing the script file named `.command.sh`[K
+[K
+ -- Check '.nextflow.log' file for details[39m[K
+
+
+================================================================================
+[2026-04-26] Run #5 result — FAILED (same chocophlan error; root cause: stale
+                                     Batch-managed merged launch template)
+================================================================================
+
+profile_function failed on both samples with the SAME error as run #4:
+  CRITICAL ERROR: The directory provided for the ChocoPhlAn database at
+  /mnt/dbs/chocophlan_v4_alpha/ does not exist.
+
+But the worker provisioning came from DIFFERENT launch templates than expected.
+This is the surprise: AWS Batch's internal LT merging.
+
+Investigation
+-------------
+Run-5 workers (i-0691d68cb529d0fc4, i-0cf5db89e17e600bf) report tag
+aws:ec2launchtemplate:id =
+  lt-01d1dc88e9d17dafa  (OnDemand wrapper, name: Batch-lt-e6beaf02-...-rev-2)
+  lt-0e794f64e845bb67d  (Spot wrapper,    name: Batch-lt-1c8bf6c4-...-rev-2)
+Both launched from the wrapper LTs at version 1.
+
+These are NOT the customer LT we updated. Customer LT lt-0d9193dd0f66d68ee
+was correctly bumped to v9 by the CFN deploy and contains the sync block
+(verified with `describe-launch-template-versions ... v9`).
+
+The CE configurations still point at lt-0d9193dd0f66d68ee with version=$Latest:
+  OnDemandComputeEnvironme-BlIl26JdB3ef8RMS  ->  lt-0d9193dd0f66d68ee/$Latest
+  SpotComputeEnvironment-Eyi8eJp5FEi4DwVk    ->  lt-0d9193dd0f66d68ee/$Latest
+
+So why are workers launching from `Batch-lt-*-rev-2` instead?
+
+Root cause: Batch-managed merged launch templates
+-------------------------------------------------
+When a CE references a customer LT, AWS Batch creates an internal "merged"
+launch template that combines our properties (userdata, EBS, instance type)
+with Batch's required infrastructure (ECS instance profile, Batch tags, etc.).
+This merged LT is what Batch actually launches workers from, NOT the customer
+LT directly.
+
+The merged LT is minted at CE creation time and re-minted only when the CE
+itself is mutated (state toggle, instance-type change, allocation-strategy
+change, etc.). A bump to the customer LT version does NOT trigger a re-merge.
+The "rev-2" suffix on the wrapper LT name suggests Batch already re-merged
+once previously, but before today's stack update.
+
+So today's CFN deploy successfully:
+  - bumped customer LT v8 -> v9 with the /mnt/dbs sync block
+  - updated EcsInstanceRole policy with S3 read on cjb-gutz-s3-demo
+But did NOT cause Batch to refresh its merged wrappers, so workers continued
+launching with the v8-equivalent userdata (no sync).
+
+Fix path
+--------
+Cycle each CE state DISABLED -> ENABLED. This forces Batch to drop the merged
+wrapper and re-mint it from the current customer LT $Latest (= v9 = has sync
+block). No running jobs in the queue, so no disruption.
+
+  for CE in OnDemandComputeEnvironme-BlIl26JdB3ef8RMS \
+            SpotComputeEnvironment-Eyi8eJp5FEi4DwVk; do
+    aws batch update-compute-environment --compute-environment "$CE" \
+        --state DISABLED --region us-east-2
+  done
+  # wait for DISABLED to apply
+  for CE in OnDemandComputeEnvironme-BlIl26JdB3ef8RMS \
+            SpotComputeEnvironment-Eyi8eJp5FEi4DwVk; do
+    aws batch update-compute-environment --compute-environment "$CE" \
+        --state ENABLED --region us-east-2
+  done
+
+Side note for future Pull Requests / docs
+-----------------------------------------
+The CFN deploy procedure in infra/readme.md should warn that any change to
+the worker LT userdata requires a CE state-cycle afterward, otherwise the
+update silently has no effect on newly-spawned workers. This is a known
+AWS Batch wart, easy to lose hours to (we just did).
+
+Instance state at the time of this writing:
+  i-0c85d6ecbdb08bac8  HEAD NODE (this VM, launched 2026-04-15) — DO NOT TOUCH
+  i-01286181274e20cbc  orphan worker from run #2; job ca68ee62 terminated;
+                       Batch will reap the instance shortly
+  i-0691d68cb529d0fc4  run-5 worker, OnDemand, will be drained at CE cycle
+  i-0cf5db89e17e600bf  run-5 worker, Spot,     will be drained at CE cycle
+
+Run-5 driver: EXITED. Batch queue: empty.
+
+================================================================================
+[2026-04-26 ~14:00 UTC] Root cause identified + fix deployed (new session)
+================================================================================
+
+Root cause
+----------
+All 5 runs failed at profile_function (HUMAnN4) because /mnt/dbs/chocophlan_v4_alpha/
+did not exist on the worker when the job started. The ECS agent on the AL2023
+ECS-optimized AMI auto-starts on boot and registers with Batch BEFORE the
+UserData cloud-init script runs. The S3 sync (~65 GiB, 30k objects) hadn't
+completed — or even started — by the time Batch scheduled HUMAnN jobs.
+
+MetaPhlAn worked because its DB (9 files, 19.2 GiB) synced faster than
+ChocoPhlAn (30,094 files, 41.7 GiB). The per-file overhead of syncing 30k
+small files means ChocoPhlAn always finishes last.
+
+Evidence from CloudWatch logs (/aws/batch/job):
+  nf-barbarahelena-humann-4-0-3/default/6092d433... → exit 1, 6s
+    "CRITICAL ERROR: The directory provided for the ChocoPhlAn database at
+     /mnt/dbs/chocophlan_v4_alpha/ does not exist."
+  nf-barbarahelena-humann-4-0-3/default/97c7493b... → identical
+
+DB sizes in s3://cjb-gutz-s3-demo/ (excluding referencedata/):
+  metaphlan_databases/                    9 files    19.2 GiB
+  chocophlan_v4_alpha/                30,094 files   41.7 GiB
+  uniref90_annotated_v4_alpha.../         1 file      1.6 GiB
+  full_mapping_v4_alpha/                 20 files     2.7 GiB
+  Total:                            ~30,124 files   ~65.2 GiB
+
+Fix applied
+-----------
+infra/batch-stack.yaml UserData now:
+  1. Stops ECS agent immediately: systemctl stop ecs
+  2. Installs miniconda + awscli
+  3. Syncs S3 databases to /mnt/dbs/
+  4. Starts ECS agent: systemctl start ecs
+
+Commit: e6aea80 "Fix ECS/S3-sync race condition and add Claude Code agents and skills"
+
+Deployment
+----------
+  1. CFN stack deployed:
+       aws cloudformation deploy --stack-name nf-reads-profiler-batch ...
+     Result: Successfully created/updated stack
+     Launch template bumped to v10 — confirmed UserData has:
+       line 16: systemctl stop ecs
+       line 35: /opt/conda-aws/bin/aws s3 sync s3://cjb-gutz-s3-demo /mnt/dbs/ ...
+       line 39: systemctl start ecs
+
+  2. CE state-cycle (DISABLED → ENABLED) to force Batch to re-mint its
+     merged launch template wrapper from customer LT v10:
+       SpotComputeEnvironment-Eyi8eJp5FEi4DwVk    ENABLED / VALID
+       OnDemandComputeEnvironme-BlIl26JdB3ef8RMS   ENABLED / VALID
+
+  3. Guardrails hook added (.claude/hooks/guardrails.sh) — nextflow run
+     -profile aws now prompts for user confirmation before launching.
+     Commit: e552d43
+
+Infrastructure state:
+  Stack:           nf-reads-profiler-batch — up to date
+  Launch template: v10, stop-ecs guard confirmed
+  Both CEs:        ENABLED / VALID
+  Job queue:       spot-queue, ENABLED
+  Active workers:  0 (will scale up on next run)
+
+Ready for run #6 (first run with the fix).

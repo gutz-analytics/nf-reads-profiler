@@ -1,0 +1,199 @@
+================================================================================
+Session: Launch template propagation fix + smoke test #6 — 2026-04-26
+Branch: ongoing-infra
+================================================================================
+
+## Session goal
+
+Verify agents (batch-doctor, log-reader) are operational, run smoke test #6,
+diagnose failure, and fix the launch template propagation issue.
+
+================================================================================
+1. AGENT VERIFICATION
+================================================================================
+
+Confirmed batch-doctor and log-reader agent files exist and are correctly
+structured in .claude/agents/. Both have proper frontmatter (name, description)
+and are discoverable at session start.
+
+================================================================================
+2. SMOKE TEST #6 — FAILED
+================================================================================
+
+Ran: bash infra/smoke-test.sh
+Project: smoke-20260426-151854
+
+Pre-flight: all passed (spot-queue ENABLED, 2 CEs VALID, S3 accessible)
+Pipeline: FAILED at profile_function (SRR6664342)
+
+Error:
+  CRITICAL ERROR: The directory provided for the ChocoPhlAn database at
+  /mnt/dbs/chocophlan_v4_alpha/ does not exist.
+
+  Cause: "Essential container in task exited" — HUMAnN started before the
+  worker's S3 database sync completed.
+
+  Cascade: profile_taxa and profile_function for other sample aborted
+  ("Job killed by NF").
+
+================================================================================
+3. ROOT CAUSE ANALYSIS
+================================================================================
+
+The previous session (see 2026-04-26-infra-debug-guardrails.log) applied the
+fix: launch template v10 with `systemctl stop ecs` before S3 sync and
+`systemctl start ecs` after. The template source was correct. But the fix
+never reached workers.
+
+Discovery chain:
+
+  a) Decoded UserData from nf-reads-profiler-worker v10 (the source template):
+     - Has the stop guard — correct
+     - BUT the UserData was duplicated: two identical MIME multipart documents
+       concatenated together (two systemctl stop/start pairs)
+
+  b) Checked the Batch-managed launch templates (Batch-lt-*-rev-2):
+     - These are what workers ACTUALLY boot with
+     - Batch snapshots the source template UserData when the CE is created
+     - ALL four managed templates had systemctl stop count: 0
+     - They were still using the OLD UserData from v9 (no stop guard)
+
+  c) Checked v9 of nf-reads-profiler-worker:
+     - No `systemctl stop ecs` at top
+     - Used `systemctl restart ecs` at the end (not stop-before/start-after)
+     - This was the version the Batch-managed templates had baked in
+
+  Root cause: AWS Batch does NOT dynamically re-read the source launch
+  template when CEs reference $Latest. It snapshots the UserData at CE
+  creation/update time. Updating the source template to v10 with the fix
+  had no effect because the CEs were never told to re-snapshot.
+
+================================================================================
+4. FIX APPLIED
+================================================================================
+
+  Step 1: Attempted CloudFormation deploy — no template changes, so no-op.
+
+  Step 2: Disabled both CEs:
+    SpotComputeEnvironment-Eyi8eJp5FEi4DwVk    → DISABLED
+    OnDemandComputeEnvironme-BlIl26JdB3ef8RMS   → DISABLED
+
+  Step 3: Simple disable/re-enable did NOT regenerate managed templates.
+    Batch-lt-* names stayed at rev-2 with the same stale UserData.
+
+  Step 4: Explicitly updated both CEs with launch template + updateToLatestImageVersion:
+    aws batch update-compute-environment \
+      --compute-environment <CE> \
+      --compute-resources '{"launchTemplate":{"launchTemplateId":"lt-0d9193dd0f66d68ee","version":"$Latest"},"updateToLatestImageVersion":true}' \
+      --region us-east-2
+
+  Step 5: This triggered Batch to create new managed templates (rev-3):
+    Batch-lt-1c8bf6c4-...-rev-3   systemctl stop ecs count: 1 ✓
+    Batch-lt-e6beaf02-...-rev-3   systemctl stop ecs count: 1 ✓
+    No duplication — 1 stop, 1 start, 3 MIME parts (our script + Batch ECS config)
+
+================================================================================
+5. VERIFICATION
+================================================================================
+
+  Both CEs: ENABLED / VALID
+  Managed launch templates: rev-3 with correct stop guard
+  Job queue: spot-queue ENABLED
+
+================================================================================
+6. BATCH-DOCTOR REPORT (concurrent with fix)
+================================================================================
+
+  Key findings from batch-doctor agent:
+  - 12+ FAILED jobs across multiple runs today
+  - Two distinct error patterns:
+    1. "user value contains invalid characters" (early runs, project name issue)
+    2. "ChocoPhlAn database does not exist" (sync race, runs 3-6)
+  - S3 source bucket (cjb-gutz-s3-demo) is 1.4 TiB total — we only need ~65 GiB
+  - The --exclude "referencedata/*" filter is too broad; should switch to
+    explicit --include for the 4 required directories
+
+================================================================================
+7. OPEN ITEMS
+================================================================================
+
+  - [ ] Re-run smoke test #7 to confirm the fix works end-to-end
+  - [ ] Consider switching S3 sync to explicit --include filters for the 4
+        required DB directories (chocophlan_v4_alpha, full_mapping_v4_alpha,
+        metaphlan_databases, uniref90_annotated_v4_alpha_ec_filtered) instead
+        of syncing the entire 1.4 TiB bucket minus referencedata
+  - [ ] Fix the duplicated UserData in nf-reads-profiler-worker v10 source
+        template (harmless now since Batch re-snapshotted, but should be clean)
+  - [ ] Investigate the "user value contains invalid characters" errors from
+        earlier runs (project name validation)
+
+================================================================================
+8. KEY LESSON LEARNED
+================================================================================
+
+  AWS Batch snapshots launch template UserData at CE create/update time.
+  Updating the source launch template (even to $Latest) does NOT propagate
+  to workers. You MUST call update-compute-environment with the launch
+  template reference AND updateToLatestImageVersion:true to force Batch
+  to regenerate its managed launch templates.
+
+  A simple disable/re-enable cycle is NOT sufficient. The explicit
+  update-compute-environment call with compute-resources is required.
+
+================================================================================
+9. SMOKE TEST #7 — IN PROGRESS / S3 SYNC PERFORMANCE PROBLEM
+================================================================================
+
+  Smoke test #7 launched at ~16:48 UTC with both fixes deployed (rev-4
+  managed templates: ECS stop guard + narrowed S3 include filters).
+
+  Pipeline submitted 3 jobs (2x AWS_DOWNLOAD, 1x get_software_versions).
+  A fresh r8g.2xlarge spot worker (i-00f55b99ca3876c11) provisioned, but
+  after 20+ minutes all 3 jobs were still RUNNABLE — the worker was still
+  syncing 65 GiB / 30k objects from S3 before ECS could start.
+
+  Problem: spot instances are idling (and costing money) for 20+ minutes
+  just copying database files before doing any useful work. The S3 sync
+  of 30k small files is inherently slow regardless of include filters.
+
+  Decision: switch to a custom AMI with databases pre-baked. This
+  eliminates boot-time sync entirely — workers come online and start
+  processing immediately.
+
+================================================================================
+10. AMI vs EFS DECISION
+================================================================================
+
+  Brainstormed two alternatives to the S3 sync:
+
+  Custom AMI (pre-baked databases) — CHOSEN
+    Pros: fastest boot (seconds), best read perf (local SSD), no ongoing infra,
+          no throughput charges, automated Packer build
+    Cons: must rebuild AMI (~30 min) on DB version bumps (few times/year),
+          region-specific, snapshot cost (~$3.75/mo)
+
+  EFS (shared NFS filesystem) — REJECTED
+    Pros: no AMI rebuilds, instant mount, update DBs in one place
+    Cons: NFS latency kills Bowtie2/DIAMOND random-seek performance (same
+          reason ADR-001 rejected it), throughput costs at scale, monthly cost
+          even when idle
+
+  Key factor: databases change only a few times per year, so AMI rebuild
+  overhead is negligible. The I/O performance advantage of local SSD is
+  preserved (core rationale from ADR-001).
+
+  Created: issues/I14-custom-ami-worker.md
+  Updated: infra/adr-001-db-placement.md (status → Superseded)
+
+================================================================================
+11. OPEN ITEMS (UPDATED)
+================================================================================
+
+  - [pending] Smoke test #7 still running — waiting for DB sync to complete
+  - [done] Narrowed S3 sync to explicit --include (committed 1c9c420)
+  - [done] Forced CE update to propagate launch template (rev-4 confirmed)
+  - [done] AMI vs EFS decision documented (issues/I14-custom-ami-worker.md)
+  - [done] ADR-001 superseded, docs/agents/skills updated
+  - [next] Implement custom AMI: Packer template, build script, CFN update
+  - [ ] Fix duplicated UserData in nf-reads-profiler-worker v10 source template
+  - [ ] Investigate "user value contains invalid characters" errors from earlier runs
