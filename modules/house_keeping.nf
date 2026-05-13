@@ -28,7 +28,7 @@ process get_software_versions {
   echo $workflow.nextflow.version > v_nextflow.txt
 
   echo $params.docker_container_fastp | cut -d: -f 2 > v_fastp.txt
-  echo $params.docker_container_humann3 | cut -d: -f 2 > v_humann.txt
+  echo $params.docker_container_humann4 | cut -d: -f 2 > v_humann.txt
   echo $params.docker_container_metaphlan | cut -d: -f 2 > v_metaphlan.txt
   echo $params.docker_container_multiqc | cut -d: -f 2 > v_multiqc.txt
 

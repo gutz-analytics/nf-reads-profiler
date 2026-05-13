@@ -43,7 +43,7 @@ process profile_taxa {
     --tmp_dir . \\
     --index ${params.direct_metaphlan_id} \\
     --db_dir ${params.direct_metaphlan_db} \\
-    --bt2_ps ${params.bt2options} \\
+    --bt2_ps ${params.direct_bt2options} \\
     --sample_id ${name} \\
     --biom_format_output \\
     --nproc ${task.cpus * 2} \\
@@ -101,13 +101,13 @@ process profile_function {
   humann \\
     --input $reads \\
     --output . \\
-    ${params.humann_params} \\
+    ${params.humann_extraparams} \\
     --output-basename ${name} \\
     --nucleotide-database ${params.humann_chocophlan} \\
     --remove-column-description-output \\
     --protein-database ${params.humann_uniref} \\
     --utility-database ${params.humann_utilitymap} \\
-    --metaphlan-options "-t rel_ab_w_read_stats --index ${params.humann_metaphlan_index} --bowtie2db ${params.humann_metaphlan_db} --bt2_ps ${params.bt2options}" \\
+    --metaphlan-options "-t rel_ab_w_read_stats --index ${params.humann_metaphlan_id} --bowtie2db ${params.humann_metaphlan_db} --bt2_ps ${params.humann_bt2options}" \\
     --pathways metacyc \\
     --threads ${task.cpus * 2} \\
     --memory-use minimum \\
@@ -322,7 +322,7 @@ process regroup_genefamilies {
   tuple val(meta), path("*.biom"), emit: regrouped_bioms
 
   when:
-  !params.skipHumann && params.process_humann_tables && meta.type == 'genefamilies'
+  !params.skipHumann && params.humann_regroup && meta.type == 'genefamilies'
 
   script:
   run = task.ext.run ?: "${meta.run}"
@@ -341,7 +341,7 @@ process regroup_genefamilies {
     safe_cluster_process.py \\
       ${genefamilies_biom} \\
       "humann_regroup_table -i {input} -g \$group -o output_\${group}.biom" \\
-      --max-samples ${params.split_size ?: 100} \\
+      --max-samples ${params.humann_split_size ?: 100} \\
       --num-threads ${task.cpus} \\
       --final-output-dir . \\
       --command-output-location . \\

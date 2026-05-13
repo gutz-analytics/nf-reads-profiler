@@ -35,7 +35,8 @@ nf-reads-profiler - Version: ${workflow.manifest.version}
   Other options:
   MetaPhlAn parameters for taxa profiling:
     --direct_metaphlan_db path   folder for the MetaPhlAn database
-    --bt2options          value   BowTie2 options
+    --direct_bt2options   value   BowTie2 options (direct MetaPhlAn)
+    --humann_bt2options   value   BowTie2 options (HUMAnN internal MetaPhlAn)
 
   HUMANn parameters for functional profiling:
     --taxonomic_profile   path    s3path to precalculate metaphlan3 taxonomic profile output.
@@ -292,7 +293,7 @@ workflow {
     convert_tables_to_biom(ch_tables_for_biom)
     
     // Process HUMAnN tables if enabled
-    if (params.process_humann_tables) {
+    if (params.humann_regroup) {
       // Use only the genefamilies combined tables for processing
       ch_combined_genefamilies = convert_tables_to_biom.out.filter { meta, _table ->
         meta.type == 'genefamilies'
