@@ -42,7 +42,7 @@ process count_reads {
   conda "bioconda::fastp=1.2.0"
   container params.docker_container_fastp
 
-  publishDir "${params.outdir}/${params.project}/${run}/readcount", mode: 'copy', pattern: "*_readcount.txt"
+  publishDir {"${params.outdir}/${params.project}/${run}/readcount"}, mode: 'copy', pattern: "*_readcount.txt"
 
   input:
   tuple val(meta), path(reads)
@@ -121,7 +121,7 @@ process clean_reads {
 
 process MULTIQC {
   tag "$run"
-  publishDir "${params.outdir}/${params.project}/${run}/log", mode: 'copy'
+  publishDir {"${params.outdir}/${params.project}/${run}/log"}, mode: 'copy'
   conda "bioconda::multiqc=1.22"
   container params.docker_container_multiqc
 

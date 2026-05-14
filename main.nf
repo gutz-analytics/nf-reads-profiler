@@ -95,16 +95,16 @@ workflow {
     """.stripIndent()
 
   // Parse input samplesheet using nf-validation plugin
-  Channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
-      .branch {
-          local: it[1]                                    // Has fastq_1 defined
-          sra: !it[1] && it[3] =~ /^[ESD]RR[0-9]+$/     // No local files but has SRA accession
+  channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
+      .branch { row ->
+          local: row[1]                                    // Has fastq_1 defined
+          sra: !row[1] && row[3] =~ /^[ESD]RR[0-9]+$/    // No local files but has SRA accession
       }
       .set { input_ch }
 
   // Process local files
   input_ch.local
-      .map { meta, fastq_1, fastq_2, sra_id -> 
+      .map { meta, fastq_1, fastq_2, _sra_id ->
           meta.single_end = !fastq_2  // true if fastq_2 is empty/null
           fastq_2 ? [ meta, [ fastq_1, fastq_2 ] ] : [ meta, [ fastq_1 ] ]
       }
@@ -112,17 +112,16 @@ workflow {
 
   // Process SRA files - only for samples without local files
   input_ch.sra
-      .map { meta, fastq_1, fastq_2, sra_id ->
+      .map { meta, _fastq_1, _fastq_2, sra_id ->
           [ meta, sra_id ]
       }
       .set { sra_ids }
 
   AWS_DOWNLOAD(sra_ids)
 
-  def sortReads = { reads -> 
-      reads.sort() 
-  }
-
+  // def sortReads = { reads ->
+  //     reads.sort()
+  // }
   // FASTERQ_DUMP(AWS_DOWNLOAD.out.sra_file)
   //     .reads
   //     .map { meta, reads -> 
@@ -187,7 +186,7 @@ workflow {
                     meta_new.put('type','genefamilies')
                     [ meta_new, table ]
                 }
-                .groupTuple(sort: true)
+                .groupTuple()
 
     ch_reactions = profile_function.out.profile_function_reactions
                 .map { meta, table ->
@@ -195,7 +194,7 @@ workflow {
                     meta_new.put('type','reactions')
                     [ meta_new, table ]
                 }
-                .groupTuple(sort: true)
+                .groupTuple()
 
     ch_pathabundance = profile_function.out.profile_function_pa
                 .map { meta, table ->
@@ -203,7 +202,7 @@ workflow {
                     meta_new.put('type','pathabundance')
                     [ meta_new, table ]
                 }
-                .groupTuple(sort: true)
+                .groupTuple()
 
     // HUMAnN-generated taxonomy profiles (separate from independent MetaPhlAn)
     ch_humann_taxonomy = profile_function.out.profile_function_metaphlan
@@ -212,7 +211,7 @@ workflow {
                     meta_new.put('type','metaphlan_profile')
                     [ meta_new, table ]
                 }
-                .groupTuple(sort: true)
+                .groupTuple()
 
     combine_humann_tables(ch_genefamilies.mix(ch_reactions, ch_pathabundance))
     
@@ -240,7 +239,7 @@ workflow {
                   def meta_new = meta - meta.subMap('id')
               [ meta_new, table ]
             }
-            .groupTuple(sort: true)
+            .groupTuple()
 
   combine_metaphlan_tables(ch_metaphlan)
 
@@ -257,7 +256,7 @@ workflow {
     // Group HUMAnN unaligned reads by study for MEDI
     profile_function.out.unmapped_reads
       .map { meta, reads -> [meta.run, meta, reads] }
-      .groupTuple(by: [0], sort: true)
+      .groupTuple(by: [0])
       .map { study, metas, reads_files ->
         def samples = [metas, reads_files].transpose().collect { m, r -> [m, r] }
         [study, samples]
@@ -318,7 +317,7 @@ workflow {
                   def meta_new = meta - meta.subMap('id')
               [ meta_new, table ]
             }
-            .groupTuple(sort: true)
+            .groupTuple()
   get_software_versions()
   MULTIQC (
     get_software_versions.out.software_versions_yaml,

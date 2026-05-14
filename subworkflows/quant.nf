@@ -27,7 +27,7 @@ workflow MEDI_QUANT {
         kraken(reads)
 
         // Extract k2 files from kraken output (metadata preserved)
-        kraken_k2_channel = kraken.out.map { meta, k2_file, tsv_file -> [meta, k2_file] }
+        kraken_k2_channel = kraken.out.map { meta, k2_file, _tsv_file -> [meta, k2_file] }
 
         // Debug: Show individual k2 files with preserved metadata
         // kraken_k2_channel.view { meta, k2_file -> "K2 File: Study=${meta.run}, Sample=${meta.id}, File=${k2_file.name}" }
