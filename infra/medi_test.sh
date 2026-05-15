@@ -119,6 +119,8 @@ echo "  Start: $(date -u)"
 set +e
 nextflow run main.nf \
     -profile aws \
+    -work-dir /mnt/scratch/nf-local-work \
+    -bucket-dir s3://gutz-nf-reads-profilers-workdir/work \
     --input "$SAMPLESHEET_S3" \
     --project "$PROJECT" \
     --enable_medi \
