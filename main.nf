@@ -78,10 +78,10 @@ ${summary.collect { k,v -> "            <dt>$k</dt><dd>$v</dd>" }.join("\n")}
 def output_exists(meta) {
   def run = meta.run
   def name = meta.id
-  def pathcoverage_file  = file("${params.outdir}/${params.project}/${run}/function/${name}_pathcoverage.tsv")
-  def genefamilies_file  = file("${params.outdir}/${params.project}/${run}/function/${name}_genefamilies.tsv")
-  def pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_pathabundance.tsv")
-  return pathcoverage_file.exists() && genefamilies_file.exists() && pathabundance_file.exists()
+  def genefamilies_file  = file("${params.outdir}/${params.project}/${run}/function/${name}_2_genefamilies.tsv")
+  def reactions_file     = file("${params.outdir}/${params.project}/${run}/function/${name}_3_reactions.tsv")
+  def pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_4_pathabundance.tsv")
+  return genefamilies_file.exists() && reactions_file.exists() && pathabundance_file.exists()
 }
 
 
