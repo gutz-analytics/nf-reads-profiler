@@ -81,7 +81,10 @@ def output_exists(meta) {
   def genefamilies_file  = file("${params.outdir}/${params.project}/${run}/function/${name}_2_genefamilies.tsv")
   def reactions_file     = file("${params.outdir}/${params.project}/${run}/function/${name}_3_reactions.tsv")
   def pathabundance_file = file("${params.outdir}/${params.project}/${run}/function/${name}_4_pathabundance.tsv")
-  return genefamilies_file.exists() && reactions_file.exists() && pathabundance_file.exists()
+  def humann_done = genefamilies_file.exists() && reactions_file.exists() && pathabundance_file.exists()
+  if (!params.enable_medi) { return humann_done }
+  def medi_file = file("${params.outdir}/${params.project}/${run}/medi/kraken2/${name}_filtered.k2")
+  return humann_done && medi_file.exists()
 }
 
 
