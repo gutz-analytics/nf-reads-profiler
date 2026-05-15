@@ -264,11 +264,47 @@ process convert_tables_to_biom {
   output_name = (stratification && stratification != 'combined' && stratification != 'null') ? "${run}_${type}_${stratification}.biom" : "${run}_${type}.biom"
   """
   echo "Converting ${type} table to biom format (${stratification})"
-  biom convert \\
-    --input-fp ${table} \\
-    --output-fp ${output_name} \\
-    --table-type '${table_type}' \\
-    --to-hdf5
+
+  has_data=\$(python3 -c "
+import sys
+def pos(v):
+    try: return float(v) > 0
+    except: return False
+with open('${table}') as f:
+    for line in f:
+        if line.startswith('#') or not line.strip():
+            continue
+        parts = line.strip().split('\\t')
+        if parts[0] in ('UNMAPPED', 'UNINTEGRATED'):
+            continue
+        if any(pos(v) for v in parts[1:] if v):
+            print('yes'); sys.exit(0)
+print('no')
+")
+
+  if [ "\$has_data" = "yes" ]; then
+    biom convert \\
+      --input-fp ${table} \\
+      --output-fp ${output_name} \\
+      --table-type '${table_type}' \\
+      --to-hdf5
+  else
+    echo "Table is empty or all-zero — writing empty biom placeholder"
+    python3 -c "
+import h5py, numpy as np
+with h5py.File('${output_name}', 'w') as f:
+    f.attrs['id'] = 'None'
+    f.attrs['type'] = '${table_type}'
+    f.attrs['format'] = 'Biological Observation Matrix 1.0.0'
+    f.attrs['format_url'] = 'http://biom-format.org'
+    f.attrs['generated_by'] = 'nf-reads-profiler'
+    f.attrs['creation_date'] = ''
+    f.attrs['shape'] = np.array([0, 0], dtype=np.int32)
+    f.attrs['nnz'] = np.int32(0)
+    f.create_group('observation').create_dataset('ids', data=np.array([], dtype='S'))
+    f.create_group('sample').create_dataset('ids', data=np.array([], dtype='S'))
+"
+  fi
   """
 }
 

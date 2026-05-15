@@ -97,10 +97,15 @@ workflow {
   // Parse input samplesheet using nf-validation plugin
   channel.fromList(samplesheetToList(params.input, "assets/schema_input.json"))
       .branch { row ->
+          skip:  params.skipCompleted && output_exists(row[0])
           local: row[1]                                    // Has fastq_1 defined
-          sra: !row[1] && row[3] =~ /^[ESD]RR[0-9]+$/    // No local files but has SRA accession
+          sra:   !row[1] && row[3] =~ /^[ESD]RR[0-9]+$/  // No local files but has SRA accession
       }
       .set { input_ch }
+
+  // Log samples skipped because outputs already exist
+  input_ch.skip
+      .map { row -> log.info "Skipping completed sample ${row[0].id} (outputs already exist in ${params.outdir})" }
 
   // Process local files
   input_ch.local
@@ -171,14 +176,9 @@ workflow {
   profile_taxa(merged_reads)
 
 
-  // Skip samples whose HUMAnN outputs already exist (production resume optimisation)
-  ch_filtered_reads = params.skipCompleted
-    ? merged_reads.filter { meta, _reads -> !output_exists(meta) }
-    : merged_reads
-
   // Functional profiling (HUMAnN4) if not skipped
   if ( ! params.skipHumann ) {
-    profile_function(ch_filtered_reads)
+    profile_function(merged_reads)
 
     ch_genefamilies = profile_function.out.profile_function_gf
                 .map { meta, table ->
@@ -303,10 +303,10 @@ workflow {
 
   // MultiQC setup
   ch_multiqc_files = channel.empty()
-  ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log.ifEmpty([]))
-  // ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log.ifEmpty([]))
+  ch_multiqc_files = ch_multiqc_files.concat(clean_reads.out.fastp_log)
+  // ch_multiqc_files = ch_multiqc_files.concat(profile_taxa.out.profile_taxa_log)
   if ( ! params.skipHumann ) {
-    ch_multiqc_files = ch_multiqc_files.concat(profile_function.out.profile_function_log.ifEmpty([]))
+    ch_multiqc_files = ch_multiqc_files.concat(profile_function.out.profile_function_log)
   }
   
 
