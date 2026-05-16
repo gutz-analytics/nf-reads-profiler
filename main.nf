@@ -256,14 +256,18 @@ workflow {
       error "enable_medi requires skipHumann=false — MEDI uses HUMAnN diamond_unaligned reads"
     }
 
-    // Group HUMAnN unaligned reads by study for MEDI
+    // Stream each sample into MEDI as it finishes HUMAnN — no waiting for study-mates.
+    // MEDI_QUANT re-groups internally (by study+level) for merge steps.
+    // To batch all samples before Kraken2 starts (useful on local SSD to guarantee the
+    // 415 GB DB is page-cached before the first job), restore the groupTuple block:
+    //   .map { meta, reads -> [meta.run, meta, reads] }
+    //   .groupTuple(by: [0])
+    //   .map { study, metas, reads_files ->
+    //     def samples = [metas, reads_files].transpose().collect { m, r -> [m, r] }
+    //     [study, samples]
+    //   }
     profile_function.out.unmapped_reads
-      .map { meta, reads -> [meta.run, meta, reads] }
-      .groupTuple(by: [0])
-      .map { study, metas, reads_files ->
-        def samples = [metas, reads_files].transpose().collect { m, r -> [m, r] }
-        [study, samples]
-      }
+      .map { meta, reads -> [meta.run, [[meta, reads]]] }
       .set { studies_with_samples }
 
     MEDI_QUANT(
