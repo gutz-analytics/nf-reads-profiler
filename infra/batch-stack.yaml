@@ -398,6 +398,7 @@ Resources:
             Ebs:
               VolumeSize: 500
               VolumeType: gp3
+              Iops: 9000            # 3x default (3000→9000); gp3 max is 16000
               DeleteOnTermination: true
               Encrypted: true
         UserData:
